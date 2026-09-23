@@ -1,5 +1,59 @@
 # AI-Driven Open & Distance Learning Platform For Aust
 
+## 🚀 Sandbox Preview (Live Now)
+
+All three services are running via PM2 in this sandbox:
+
+| Service | Port | Public Preview URL | Local URL |
+|---|---|---|---|
+| **Admissions Portal** (frontend) | 3000 | https://3000-i193givvsm69o0n33c8jq-2b54fc91.sandbox.novita.ai | http://localhost:3000 |
+| **LMS Portal** (lms-frontend) | 3001 | https://3001-i193givvsm69o0n33c8jq-2b54fc91.sandbox.novita.ai | http://localhost:3001 |
+| **Backend API** (Express) | 5000 | https://5000-i193givvsm69o0n33c8jq-2b54fc91.sandbox.novita.ai | http://localhost:5000/api |
+
+> Preview URLs are tied to this sandbox session. If the sandbox restarts, re-run
+> `pm2 resurrect` or `pm2 start ecosystem.config.cjs` from `/home/user/webapp`
+> and request a fresh `GetServiceUrl` for each port.
+
+### Demo Credentials
+
+**Admissions Portal (port 3000)**
+| Role | Username / Email | Password |
+|---|---|---|
+| Super Admin | `superadmin` / superadmin@aust.edu.pk | `superadmin123` |
+| Director Admissions | `director` / director@aust.edu.pk | `director123` |
+| Department Coordinator | `coordinator` / coordinator@aust.edu.pk | `coord123` |
+| Student/Applicant | `student` / student@example.com | `student123` |
+
+**LMS Portal (port 3001)**
+| Role | Username | Password |
+|---|---|---|
+| Super Admin | `superadmin` | `superadmin123` |
+| Teacher | `teacher1` | `Lms@1234` |
+| Course Coordinator | `coord1` | `Lms@1234` |
+| Students | `ADCS-001`, `ADCS-002`, `ADCS-003` | `Lms@1234` |
+
+Plus a larger synthetic dataset (160 students, 20 teachers, 48 courses across
+2 departments/programs) seeded via `seedUniversityDataset.js` for realistic
+browsing/testing.
+
+### How it runs (this sandbox)
+- **Backend**: Express + Prisma ORM on **SQLite** (`backend/prisma/dev.db`),
+  started with PM2 as `aust-backend` (`node src/server.js`, port 5000).
+  Env vars live in `backend/.env` (gitignored — recreate from the list in
+  `backend/package.json`'s scripts / this README if missing:
+  `DATABASE_URL`, `JWT_SECRET`, `PORT`, `FRONTEND_URL`, `CAPTCHA_DISABLED`, etc.)
+- **Admissions frontend**: Vite dev server, PM2 process `admissions-frontend`
+  (`npm run dev`, port 3000). Proxies `/api` → backend on 5000 in dev; when
+  opened via the public sandbox URL it auto-detects the host and calls the
+  backend's public port-5000 URL directly (see `frontend/src/utils/api.js`).
+- **LMS frontend**: Vite dev server, PM2 process `lms-frontend`
+  (`npm run dev -- --host 0.0.0.0 --port 3001`). Same host auto-detection
+  pattern in `lms-frontend/src/services/authService.js`.
+- Restart everything: `cd /home/user/webapp && pm2 restart all`
+- Logs: `pm2 logs --nostream`
+
+---
+
 ## Project Overview
 - **Name**:  AI-Driven Open & Distance Learning Platform For Aust
 
