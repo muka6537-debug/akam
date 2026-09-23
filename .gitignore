@@ -1,33 +1,39 @@
-# prod
-dist/
-
-# dev
-.yarn/
-!.yarn/releases
-.vscode/*
-!.vscode/launch.json
-!.vscode/*.code-snippets
-.idea/workspace.xml
-.idea/usage.statistics.xml
-.idea/shelf
-
-# deps
+# Dependencies
 node_modules/
-.wrangler
+**/node_modules/
 
-# env
+# Build outputs
+dist/
+build/
+**/dist/
+
+# Env & secrets
 .env
-.env.production
+**/.env
 .dev.vars
 
-# logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Prisma local DB (keep schema/migrations, ignore local data)
+backend/prisma/dev.db-journal
+*.db-journal
 
-# misc
+# Uploads (runtime)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Logs & PM2
+*.log
+logs/
+.pm2/
+pids/
+*.pid
+
+# OS / editor
 .DS_Store
+.vscode/
+.idea/
+
+# Backups
+*.tar.gz
+*.zip
+*.bak
+backend/prisma/dev.db
