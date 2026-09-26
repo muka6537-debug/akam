@@ -87,9 +87,18 @@ async function installResultLockTriggers(client = prisma) {
   return true;
 }
 
-/** Translate a trigger abort into a clean 409 for API callers. */
+/**
+ * Translate a trigger abort into a clean 409 for API callers. Prisma surfaces a
+ * SQLite RAISE(ABORT) raised inside a CourseResult trigger as P2003, so both
+ * shapes are recognised.
+ */
+function isImmutableError(err) {
+  if (!err) return false;
+  if (/RESULT_IMMUTABLE/.test(String(err.message || ''))) return true;
+  return err.code === 'P2003' && err.meta && err.meta.modelName === 'CourseResult';
+}
 function mapImmutableError(err) {
-  if (err && /RESULT_IMMUTABLE/.test(String(err.message || ''))) {
+  if (isImmutableError(err)) {
     return httpErr(409, 'This result is permanently locked (submitted to / declared by the Exam Controller). No role can edit it.');
   }
   return err;
@@ -105,4 +114,5 @@ module.exports = {
   assertEditable,
   installResultLockTriggers,
   mapImmutableError,
+  isImmutableError,
 };

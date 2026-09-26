@@ -203,6 +203,10 @@ app.use((err, req, res, next) => {
   if (err.code === 'P2002') {
     return res.status(409).json({ error: 'A record with these unique values already exists.' });
   }
+  // Result-workflow DB trigger (submitted / declared results are immutable).
+  if (require('./utils/resultWorkflow').isImmutableError(err)) {
+    return res.status(409).json({ error: 'This result is permanently locked (submitted to / declared by the Exam Controller). No role can edit it.' });
+  }
   if (err.code === 'P2025') {
     return res.status(404).json({ error: 'Record not found.' });
   }
@@ -308,6 +312,25 @@ app.use((err, req, res, next) => {
     console.log(`[startup-dept-isolation] Normalised ${out.programsFixed} program(s), bound ${out.staffBound} staff.`);
   } catch (e) {
     console.warn('[startup-dept-isolation] Skipped:', e.message);
+  }
+})();
+
+// ============================================================
+// STARTUP INITIALIZER — RESULT WORKFLOW (Part A).
+// 1. Back-fills workflowStage for legacy rows (idempotent):
+//      PUBLISHED → OFFICIAL, FINALIZED → SUBMITTED.
+// 2. Installs DB triggers making SUBMITTED+ results immutable.
+// ============================================================
+(async () => {
+  try {
+    const prismaShared = require('./utils/prisma');
+    const { installResultLockTriggers } = require('./utils/resultWorkflow');
+    await prismaShared.$executeRawUnsafe(`UPDATE "CourseResult" SET "workflowStage"='OFFICIAL', "officialAt"=COALESCE("publishedAt", CURRENT_TIMESTAMP) WHERE "status"='PUBLISHED' AND "workflowStage"='DRAFT'`);
+    await prismaShared.$executeRawUnsafe(`UPDATE "CourseResult" SET "workflowStage"='SUBMITTED' WHERE "status"='FINALIZED' AND "workflowStage"='DRAFT'`);
+    await installResultLockTriggers(prismaShared);
+    console.log('[startup-result-workflow] Stages back-filled, immutability triggers installed.');
+  } catch (e) {
+    console.warn('[startup-result-workflow] Skipped:', e.message);
   }
 })();
 
