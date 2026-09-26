@@ -1211,6 +1211,14 @@ model CourseOffering {
   quizWeight       Float @default(15)
   midWeight        Float @default(25)
   finalWeight      Float @default(40)
+  // B2.b — per-course Total Marks for Mid and Final (teacher-entered).
+  midTotalMarks    Float?
+  finalTotalMarks  Float?
+  // A7/A8 — result submission tracking for this subject.
+  resultLockedAt     DateTime?
+  resultLockedById   String?
+  resultSubmittedAt  DateTime?
+  resultSubmittedById String?
   status       String   @default("ACTIVE")     // ACTIVE | COMPLETED | CANCELLED
   isDeleted    Boolean  @default(false)
   deletedAt    DateTime?
@@ -1341,6 +1349,9 @@ model Assignment2 {
   description String?
   totalMarks  Float    @default(100)
   weight      Float    @default(0)             // contribution within assignment bucket
+  // ASSIGNMENT | PROJECT — project work is submitted/graded like an assignment
+  // but counts towards the coordinator's Project component.
+  kind        String   @default("ASSIGNMENT")
   dueDate     String
   startTime   String?                          // optional start time (HH:mm)
   endTime     String?                          // optional end time (HH:mm)
@@ -1558,6 +1569,9 @@ model CourseResult {
   midMax          Float @default(100)
   finalMax        Float @default(100)
   labMax          Float @default(100)
+  // Project component (coordinator-configurable for any subject).
+  projectMarks    Float @default(0)
+  projectMax      Float @default(100)
   totalPercent Float    @default(0)
   letterGrade  String?
   gradePoints  Float    @default(0)
@@ -1565,6 +1579,19 @@ model CourseResult {
   status       String   @default("DRAFT")
   remarks      String?
   publishedAt  DateTime?
+  // RESULT WORKFLOW (Part A). Sequential, one-way stages:
+  //   DRAFT       teacher editing (live/informational for the student)
+  //   LOCKED      teacher published the subject result (PIN) — teacher can't edit
+  //   SUBMITTED   teacher final-submitted to Exam Controller — immutable for ALL roles
+  //   UNOFFICIAL  Exam Controller declared the unofficial result (GPA/transcript visible)
+  //   OFFICIAL    Exam Controller declared the official result — archived, immutable
+  // Immutability from SUBMITTED onward is enforced by a DB trigger
+  // (see src/utils/resultWorkflow.js → installResultLockTriggers).
+  workflowStage String   @default("DRAFT")
+  lockedAt      DateTime?
+  submittedAt   DateTime?
+  unofficialAt  DateTime?
+  officialAt    DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -1572,6 +1599,7 @@ model CourseResult {
   student  LmsUser        @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([offeringId, studentId])
+  @@index([workflowStage])
   @@index([offeringId])
   @@index([studentId])
 }
@@ -1784,6 +1812,9 @@ model LiveClass {
   status      String   @default("SCHEDULED")
   recordingUrl String?
   hostId      String?                          // LmsUser.id (teacher)
+  // B3.a — live classes auto-generated from the coordinator's Weekly Schedule
+  // carry the originating ScheduleSlot id (null = manually scheduled).
+  scheduleSlotId Int?
   isDeleted   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1793,6 +1824,7 @@ model LiveClass {
 
   @@index([offeringId])
   @@index([scheduledAt])
+  @@index([scheduleSlotId])
 }
 
 // ============================================================
@@ -3225,4 +3257,22 @@ model SaActivityLog {
   @@index([module])
   @@index([actorId])
   @@index([createdAt])
+}
+
+// ============================================================
+// A4 — TEACHER MARKS-MODULE PIN (separate 5-digit numeric PIN)
+//   pinHash: bcrypt hash (never stored in clear). pinVersion bumps on every
+//   (re)set so outstanding marks-session tokens are invalidated.
+//   failedAttempts / lockedUntil implement brute-force lockout.
+// ============================================================
+model TeacherMarksPin {
+  id             Int       @id @default(autoincrement())
+  lmsUserId      String    @unique
+  pinHash        String
+  pinVersion     Int       @default(1)
+  failedAttempts Int       @default(0)
+  lockedUntil    DateTime?
+  lastVerifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }

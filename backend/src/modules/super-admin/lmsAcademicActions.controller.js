@@ -19,17 +19,11 @@ function pageArgs(req) {
   return { page, pageSize, skip: (page - 1) * pageSize, take: pageSize };
 }
 
-// Grade computation mirrors the standard LMS scheme letter mapping.
+// Grade computation — delegates to the single official AUST grading engine.
+const { gradeFromPercent: _austGrade } = require('../../utils/lmsGrading');
 function computeGrade(pct) {
-  if (pct >= 85) return { letterGrade: 'A', gradePoints: 4.0 };
-  if (pct >= 80) return { letterGrade: 'A-', gradePoints: 3.7 };
-  if (pct >= 75) return { letterGrade: 'B+', gradePoints: 3.3 };
-  if (pct >= 70) return { letterGrade: 'B', gradePoints: 3.0 };
-  if (pct >= 65) return { letterGrade: 'B-', gradePoints: 2.7 };
-  if (pct >= 60) return { letterGrade: 'C+', gradePoints: 2.3 };
-  if (pct >= 55) return { letterGrade: 'C', gradePoints: 2.0 };
-  if (pct >= 50) return { letterGrade: 'D', gradePoints: 1.0 };
-  return { letterGrade: 'F', gradePoints: 0.0 };
+  const g = _austGrade(pct);
+  return { letterGrade: g.letter, gradePoints: g.points };
 }
 
 // ==================================================================
