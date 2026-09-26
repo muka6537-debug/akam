@@ -27,6 +27,9 @@ const PDFDocument = require('pdfkit');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const realtime = require('../../../utils/lmsRealtime');
+const { requireMarksSession } = require('../../../utils/marksPin');
+const gradebookSvc = require('../../../services/gradebookService');
+const { assertEditable } = require('../../../utils/resultWorkflow');
 
 const router = express.Router();
 
@@ -93,6 +96,54 @@ async function getOwnedOffering(req, offeringId) {
 function offeringWhereForTeacher(req) {
   if (req.lmsUser.role === 'CourseCoordinator') return { isDeleted: false };
   return { isDeleted: false, teacherId: req.lmsUser.id };
+}
+
+// ------------------------------------------------------------
+// A1 — HARD LIMITS from the Course Coordinator's weightage config.
+// The teacher can create at most `count` items of each kind; a kind with
+// weight 0 (e.g. no Lab / no Project) cannot be created at all.
+// ------------------------------------------------------------
+async function assertAssessmentQuota(offering, kind) {
+  const cw = await prisma.courseWeightage.findUnique({ where: { courseId: offering.courseId } });
+  if (!cw) return; // coordinator has not configured this subject yet → legacy behaviour
+  const course = offering.course || await prisma.lmsCourse.findUnique({ where: { id: offering.courseId } });
+  const cfg = {
+    assignment: { weight: cw.assignmentWeight, count: cw.assignmentCount, label: 'Assignment' },
+    quiz: { weight: cw.quizWeight, count: cw.quizCount, label: 'Quiz' },
+    lab: { weight: course && course.hasLab ? cw.labTaskWeight : 0, count: cw.labTaskCount, label: 'Lab' },
+    project: { weight: cw.semesterProjectWeight, count: Number(cw.semesterProjectWeight) > 0 ? 1 : 0, label: 'Project' },
+  }[kind];
+  if (!cfg) return;
+  if (!(Number(cfg.weight) > 0) || !(Number(cfg.count) > 0)) {
+    throw httpError(403, `The Course Coordinator has not configured any ${cfg.label} for this subject.`);
+  }
+  let existing = 0;
+  if (kind === 'assignment') existing = await prisma.assignment2.count({ where: { offeringId: offering.id, isDeleted: false, NOT: { kind: 'PROJECT' } } });
+  if (kind === 'project') existing = await prisma.assignment2.count({ where: { offeringId: offering.id, isDeleted: false, kind: 'PROJECT' } });
+  if (kind === 'quiz') existing = await prisma.quiz.count({ where: { offeringId: offering.id, isDeleted: false } });
+  if (kind === 'lab') existing = await prisma.labTask.count({ where: { offeringId: offering.id, isDeleted: false } });
+  if (existing >= cfg.count) {
+    throw httpError(403, `Limit reached: the Course Coordinator allows ${cfg.count} ${cfg.label}${cfg.count === 1 ? '' : 's'} for this subject (${existing} already created).`);
+  }
+}
+
+// Marks may not change once the subject result is locked/submitted.
+async function assertMarksOpen(offeringId, studentId) {
+  const off = await prisma.courseOffering.findUnique({ where: { id: offeringId }, select: { resultLockedAt: true, resultSubmittedAt: true } });
+  if (off && (off.resultLockedAt || off.resultSubmittedAt)) {
+    throw httpError(409, off.resultSubmittedAt
+      ? 'Results for this subject were submitted to the Exam Controller and are permanently locked.'
+      : 'This subject result has been published and locked. Marks can no longer be changed.');
+  }
+  if (studentId) {
+    const r = await prisma.courseResult.findUnique({ where: { offeringId_studentId: { offeringId, studentId } } });
+    assertEditable(r);
+  }
+}
+
+// Recompute the persisted result after any grading action (real-time A2).
+async function resyncResults(offeringId, studentId) {
+  try { await gradebookSvc.syncResults(offeringId, studentId ? { studentId } : {}); } catch (_) { /* never block grading */ }
 }
 
 // ============================================================
@@ -334,12 +385,15 @@ router.post('/offerings/:id/assignments', validate([
   body('title').trim().notEmpty().withMessage('Title is required'),
   body('dueDate').trim().notEmpty().withMessage('Due date is required'),
 ]), asyncHandler(async (req, res) => {
-  await getOwnedOffering(req, parseInt(req.params.id, 10));
+  const ownedForQuota = await getOwnedOffering(req, parseInt(req.params.id, 10));
   const offeringId = parseInt(req.params.id, 10);
   const { title, description, totalMarks, dueDate, startTime, endTime, allowLate, isPublished } = req.body;
+  const kind = String(req.body.kind || 'ASSIGNMENT').toUpperCase() === 'PROJECT' ? 'PROJECT' : 'ASSIGNMENT';
+  await assertAssessmentQuota(ownedForQuota, kind === 'PROJECT' ? 'project' : 'assignment');
   const assignment = await prisma.assignment2.create({
     data: {
       offeringId,
+      kind,
       title: title.trim(),
       description: description || null,
       totalMarks: totalMarks != null ? parseFloat(totalMarks) : 100,
@@ -420,6 +474,7 @@ router.put('/submissions/:submissionId/grade', validate([
   });
   if (!sub) throw httpError(404, 'Submission not found');
   await getOwnedOffering(req, sub.assignment.offeringId);
+  await assertMarksOpen(sub.assignment.offeringId, sub.studentId);
   const marks = parseFloat(req.body.marks);
   if (marks > sub.assignment.totalMarks) throw httpError(400, `Marks cannot exceed ${sub.assignment.totalMarks}`);
   const updated = await prisma.assignmentSubmission.update({
@@ -433,6 +488,7 @@ router.put('/submissions/:submissionId/grade', validate([
     },
   });
   await audit(req, 'SUBMISSION_GRADE', 'AssignmentSubmission', submissionId, { after: { marks } });
+  await resyncResults(sub.assignment.offeringId, sub.studentId);
   realtime.emitTo(sub.studentId, 'result', { action: 'assignment-graded', offeringId: sub.assignment.offeringId });
   res.json({ submission: updated });
 }));
@@ -552,6 +608,7 @@ router.post('/offerings/:id/lab-tasks', uploadLmsMaterial.single('file'), valida
 ]), asyncHandler(async (req, res) => {
   const offering = await getOwnedLabOffering(req, parseInt(req.params.id, 10));
   const offeringId = offering.id;
+  await assertAssessmentQuota(offering, 'lab');
   const { title, description, totalMarks, dueDate, allowLate, isPublished, sectionId } = req.body;
   const labTask = await prisma.labTask.create({
     data: {
@@ -669,6 +726,7 @@ router.put('/lab-tasks/:labTaskId/marks/:studentId', validate([
   const offering = await getOwnedLabOffering(req, labTask.offeringId);
   const reg = await prisma.courseRegistration.findFirst({ where: { offeringId: labTask.offeringId, studentId } });
   if (!reg) throw httpError(404, 'Student is not registered in this offering');
+  await assertMarksOpen(labTask.offeringId, studentId);
   const marks = parseFloat(req.body.marks);
   if (marks > labTask.totalMarks) throw httpError(400, `Marks cannot exceed ${labTask.totalMarks}`);
   const data = {
@@ -684,6 +742,8 @@ router.put('/lab-tasks/:labTaskId/marks/:studentId', validate([
     create: { labTaskId, studentId, status: 'GRADED', ...data },
   });
   await audit(req, 'LABTASK_MARKS', 'LabTaskSubmission', submission.id, { after: { marks } });
+  await resyncResults(labTask.offeringId, studentId);
+  realtime.emitTo(studentId, 'result', { action: 'lab-graded', offeringId: labTask.offeringId });
   // Real-time: student sees the grade immediately; also nudge Focal Persons.
   await notify(studentId, { title: 'Lab task marks updated', message: `Your marks for lab task "${labTask.title}" were updated`, type: 'LAB_TASK', link: '/student/lab-tasks' });
   realtime.emitTo(studentId, 'labtask', { action: 'graded', labTaskId, offeringId: labTask.offeringId, marks });
@@ -700,6 +760,7 @@ router.put('/lab-submissions/:submissionId/grade', validate([
   const sub = await prisma.labTaskSubmission.findUnique({ where: { id: submissionId }, include: { labTask: true } });
   if (!sub) throw httpError(404, 'Submission not found');
   const offering = await getOwnedLabOffering(req, sub.labTask.offeringId);
+  await assertMarksOpen(sub.labTask.offeringId, sub.studentId);
   const marks = parseFloat(req.body.marks);
   if (marks > sub.labTask.totalMarks) throw httpError(400, `Marks cannot exceed ${sub.labTask.totalMarks}`);
   const updated = await prisma.labTaskSubmission.update({
@@ -707,6 +768,8 @@ router.put('/lab-submissions/:submissionId/grade', validate([
     data: { marks, feedback: req.body.feedback || null, status: 'GRADED', gradedById: req.lmsUser.id, gradedAt: new Date() },
   });
   await audit(req, 'LABTASK_MARKS', 'LabTaskSubmission', submissionId, { after: { marks } });
+  await resyncResults(sub.labTask.offeringId, sub.studentId);
+  realtime.emitTo(sub.studentId, 'result', { action: 'lab-graded', offeringId: sub.labTask.offeringId });
   await notify(sub.studentId, { title: 'Lab task marks updated', message: `Your marks for lab task "${sub.labTask.title}" were updated`, type: 'LAB_TASK', link: '/student/lab-tasks' });
   realtime.emitTo(sub.studentId, 'labtask', { action: 'graded', labTaskId: sub.labTaskId, offeringId: sub.labTask.offeringId, marks });
   realtime.emitAll('labtask-monitor', { action: 'graded', labTaskId: sub.labTaskId, offeringId: sub.labTask.offeringId });
@@ -821,8 +884,9 @@ router.get('/offerings/:id/quizzes', asyncHandler(async (req, res) => {
 router.post('/offerings/:id/quizzes', validate([
   body('title').trim().notEmpty().withMessage('Quiz title is required'),
 ]), asyncHandler(async (req, res) => {
-  await getOwnedOffering(req, parseInt(req.params.id, 10));
+  const ownedQuizOffering = await getOwnedOffering(req, parseInt(req.params.id, 10));
   const offeringId = parseInt(req.params.id, 10);
+  await assertAssessmentQuota(ownedQuizOffering, 'quiz');
   const { title, description, durationMin, startAt, endAt, shuffle } = req.body;
   const quiz = await prisma.quiz.create({
     data: {
@@ -968,6 +1032,7 @@ router.put('/quiz-attempts/:attemptId/grade', validate([
   const attempt = await prisma.quizAttempt.findUnique({ where: { id: attemptId }, include: { quiz: true } });
   if (!attempt) throw httpError(404, 'Attempt not found');
   await getOwnedOffering(req, attempt.quiz.offeringId);
+  await assertMarksOpen(attempt.quiz.offeringId, attempt.studentId);
   const score = parseFloat(req.body.score);
   if (score > attempt.maxScore) throw httpError(400, `Score cannot exceed ${attempt.maxScore}`);
   const updated = await prisma.quizAttempt.update({
@@ -975,6 +1040,7 @@ router.put('/quiz-attempts/:attemptId/grade', validate([
     data: { score, status: 'GRADED', gradedAt: new Date() },
   });
   await audit(req, 'QUIZ_ATTEMPT_GRADE', 'QuizAttempt', attemptId, { after: { score } });
+  await resyncResults(attempt.quiz.offeringId, attempt.studentId);
   realtime.emitTo(attempt.studentId, 'result', { action: 'quiz-graded', offeringId: attempt.quiz.offeringId });
   res.json({ attempt: updated });
 }));
@@ -985,7 +1051,7 @@ router.put('/quiz-attempts/:attemptId/grade', validate([
 // Gradebook: aggregate per-student component marks for an offering.
 // Computes assignment avg, quiz avg from real submissions/attempts, and
 // merges any existing CourseResult (mid/final marks set by teacher).
-router.get('/offerings/:id/gradebook', asyncHandler(async (req, res) => {
+router.get('/offerings/:id/gradebook', requireMarksSession, asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
   const offeringId = offering.id;
 
@@ -1182,7 +1248,7 @@ router.get('/offerings/:id/gradebook', asyncHandler(async (req, res) => {
 
 // Save/update results (bulk). Teacher sets mid/final marks and optionally
 // overrides assignment/quiz aggregates. We compute the weighted grade.
-router.post('/offerings/:id/results', validate([
+router.post('/offerings/:id/results', requireMarksSession, validate([
   body('results').isArray({ min: 1 }).withMessage('results[] is required'),
 ]), asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
@@ -1193,6 +1259,7 @@ router.post('/offerings/:id/results', validate([
     where: { offeringId, status: { in: ['FINALIZED', 'PUBLISHED', 'LOCKED', 'FROZEN'] } },
     select: { studentId: true },
   });
+  await assertMarksOpen(offeringId);
   const lockedStudents = new Set(publishedLock.map((r) => r.studentId));
   const attemptedLocked = req.body.results.filter((r) => r.studentId && lockedStudents.has(r.studentId));
   if (attemptedLocked.length > 0) {
@@ -1231,22 +1298,12 @@ router.post('/offerings/:id/results', validate([
 }));
 
 // Publish results for an offering (makes them visible to students + transcript)
-router.put('/offerings/:id/results/publish', asyncHandler(async (req, res) => {
-  const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
-  const offeringId = offering.id;
-  const updated = await prisma.courseResult.updateMany({
-    where: { offeringId },
-    data: { status: 'PUBLISHED', publishedAt: new Date() },
-  });
-  // Mark registrations COMPLETED.
-  await prisma.courseRegistration.updateMany({
-    where: { offeringId, status: 'ENROLLED' },
-    data: { status: 'COMPLETED' },
-  });
-  await audit(req, 'RESULTS_PUBLISH', 'CourseOffering', offeringId, { after: { count: updated.count } });
-  const publishedStudents = await prisma.courseResult.findMany({ where: { offeringId }, select: { studentId: true } });
-  realtime.emitTo(publishedStudents.map((row) => row.studentId), 'result', { action: 'published', offeringId });
-  res.json({ message: `Published ${updated.count} result(s)` });
+router.put('/offerings/:id/results/publish', requireMarksSession, asyncHandler(async (req, res) => {
+  // Part A: results are no longer published directly to students by the teacher.
+  // Use Results Submission (PIN-confirmed subject publish → final submission
+  // to the Exam Controller → unofficial / official declaration).
+  await getOwnedOffering(req, parseInt(req.params.id, 10));
+  throw httpError(410, 'Direct publishing was replaced by the Results Submission workflow. Open "Results Submission" to publish this subject with your PIN.');
 }));
 
 // ============================================================
@@ -1254,13 +1311,14 @@ router.put('/offerings/:id/results/publish', asyncHandler(async (req, res) => {
 // (semester/course/section-wise; complements the bulk gradebook save).
 // ============================================================
 // Upsert one student's component marks for an offering.
-router.put('/offerings/:id/marks/:studentId', asyncHandler(async (req, res) => {
+router.put('/offerings/:id/marks/:studentId', requireMarksSession, asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
   const offeringId = offering.id;
   const studentId = req.params.studentId;
   // Guard: student must be registered in this offering.
   const reg = await prisma.courseRegistration.findFirst({ where: { offeringId, studentId } });
   if (!reg) throw httpError(404, 'Student is not registered in this offering');
+  await assertMarksOpen(offeringId, studentId);
   const existing = await prisma.courseResult.findUnique({ where: { offeringId_studentId: { offeringId, studentId } } });
   // 1.4.1 Marks lock: block edit once result is PUBLISHED/finalized by Exam Controller.
   if (existing && existing.status !== 'DRAFT') {
@@ -1295,7 +1353,7 @@ router.put('/offerings/:id/marks/:studentId', asyncHandler(async (req, res) => {
 }));
 
 // Delete (reset) a student's result for an offering.
-router.delete('/offerings/:id/marks/:studentId', asyncHandler(async (req, res) => {
+router.delete('/offerings/:id/marks/:studentId', requireMarksSession, asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
   const offeringId = offering.id;
   const studentId = req.params.studentId;

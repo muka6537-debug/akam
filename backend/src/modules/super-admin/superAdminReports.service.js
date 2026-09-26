@@ -168,6 +168,9 @@ async function overrideCourseResult(req, res) {
 
     const result = await prisma.courseResult.findUnique({ where: { id } });
     if (!result) return res.status(404).json({ error: 'Result not found.' });
+    if ((result.workflowStage || 'DRAFT') !== 'DRAFT') {
+      return res.status(409).json({ error: 'This result is locked in the result workflow (submitted / declared) and cannot be overridden by any role.' });
+    }
 
     const editable = ['assignmentMarks', 'quizMarks', 'midMarks', 'finalMarks', 'totalPercent', 'letterGrade', 'gradePoints', 'status', 'remarks'];
     const data = {};
@@ -178,7 +181,8 @@ async function overrideCourseResult(req, res) {
         data[k] = (typeof result[k] === 'number') ? parseFloat(req.body[k]) : req.body[k];
       }
     });
-    if (data.status === 'PUBLISHED' && !result.publishedAt) data.publishedAt = new Date();
+    // Status changes belong to the result workflow; overrides may not publish.
+    delete data.status;
 
     const updated = await prisma.courseResult.update({ where: { id }, data });
     await logOverride({

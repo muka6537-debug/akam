@@ -599,9 +599,11 @@ router.put('/results/:id/publish', EXAM, asyncHandler(async (req, res) => {
   const existing = await prisma.courseResult.findUnique({ where: { id }, include: { offering: { include: { course: true } } } });
   if (!existing) throw httpError(404, 'Result not found');
   if (existing.status === 'PUBLISHED') return res.json({ result: existing, alreadyPublished: true });
-  const result = await prisma.courseResult.update({
-    where: { id }, data: { status: 'PUBLISHED', publishedAt: new Date() },
-  });
+  // Part A: single-result publishing bypassed the result workflow. Results are
+  // now declared per scope via Results Collection (unofficial) → Finalizing (official).
+  throw httpError(410, 'Per-result publishing was replaced by the Results Collection → Declare Unofficial → Declare Official workflow.');
+  // eslint-disable-next-line no-unreachable
+  const result = existing;
   await audit(req, 'EXAM_RESULT_PUBLISH', 'CourseResult', String(id), { before: existing, after: result });
   await notify(existing.studentId, {
     title: 'Result published',
@@ -713,11 +715,8 @@ router.put('/batches/:id/action', EXAM, validate([
   if (action === 'FREEZE') { data.frozenById = req.lmsUser.id; data.frozenAt = new Date(); }
   if (action === 'PUBLISH') {
     data.publishedById = req.lmsUser.id; data.publishedAt = new Date();
-    // publish all draft results in the term
-    await prisma.courseResult.updateMany({
-      where: { offering: { termId: existing.termId }, status: 'DRAFT' },
-      data: { status: 'PUBLISHED', publishedAt: new Date() },
-    });
+    // Part A: batch PUBLISH no longer mass-publishes DRAFT results (that would
+    // bypass teacher submission). Declarations happen in the result workflow.
   }
   const batch = await prisma.resultBatch.update({ where: { id }, data });
   await audit(req, `EXAM_BATCH_${action}`, 'ResultBatch', String(id), { before: existing, after: batch });
@@ -1437,6 +1436,8 @@ router.post('/offerings/:id/compile', EXAM, asyncHandler(async (req, res) => {
   const offeringId = Number(req.params.id);
   const offering = await prisma.courseOffering.findUnique({ where: { id: offeringId }, include: { course: true } });
   if (!offering) throw httpError(404, 'Offering not found');
+  // Part A: marks are owned by the teacher; the Exam Controller never rewrites them.
+  throw httpError(403, 'Exam Controllers have read-only access to marks. Results arrive via teacher submission (Result Compilation).');
   const lockedBatch = await prisma.resultBatch.findFirst({
     where: { termId: offering.termId, status: { in: ['FROZEN', 'LOCKED'] } },
   });

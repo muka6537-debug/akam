@@ -60,13 +60,19 @@ async function upsertResult(req, res) {
       where: { offeringId_studentId: { offeringId, studentId } },
     }).catch(() => null);
 
+    // Part A: results in the teacher→Exam Controller workflow are locked for
+    // every role (DB trigger enforces SUBMITTED+). Only DRAFT marks can be set,
+    // and the Super Admin cannot publish around the workflow.
+    if (existing && (existing.workflowStage || 'DRAFT') !== 'DRAFT') {
+      return res.status(409).json({ error: 'This result is locked in the result workflow and cannot be edited by any role.' });
+    }
     const data = {
       offeringId, studentId,
       assignmentMarks: aM, quizMarks: qM, midMarks: mM, finalMarks: fM,
       assignmentMax: aMax, quizMax: qMax, midMax: mMax, finalMax: fMax,
       totalPercent, letterGrade: grade.letterGrade, gradePoints: grade.gradePoints,
-      status: status || 'DRAFT', remarks: remarks || null,
-      publishedAt: (status === 'PUBLISHED') ? new Date() : (existing?.publishedAt || null),
+      status: 'DRAFT', remarks: remarks || null,
+      publishedAt: existing?.publishedAt || null,
     };
 
     const result = await prisma.courseResult.upsert({
@@ -95,7 +101,10 @@ async function publishResult(req, res) {
     const id = parseInt(req.params.id, 10);
     const existing = await prisma.courseResult.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ error: 'Result not found' });
-    const result = await prisma.courseResult.update({ where: { id }, data: { status: 'PUBLISHED', publishedAt: new Date() } });
+    // Part A: results are declared only by the Exam Controller workflow.
+    return res.status(410).json({ error: 'Results are declared through the Exam Controller workflow (Unofficial → Official) and cannot be published directly.' });
+    // eslint-disable-next-line no-unreachable
+    const result = existing;
     await logLmsAudit({ req, action: 'RESULT_PUBLISH', entity: 'CourseResult', entityId: id, before: existing, after: result, actorRole: 'Teacher' });
     await logSaActivity({ req, module: 'lms', action: 'result_publish', description: `Published result #${id}`, metadata: { resultId: id } });
     res.json({ success: true, result });

@@ -1317,6 +1317,12 @@ router.post('/quizzes/:id/submit', validate([
     },
   });
   await audit(req, 'QUIZ_SUBMIT', 'QuizAttempt', updated.id, { after: { score: graded.score } });
+  // A2 — auto-graded quiz marks reflect in both gradebooks in real time.
+  try {
+    await require('../../../services/gradebookService').syncResults(quiz.offeringId, { studentId });
+    const off = await prisma.courseOffering.findUnique({ where: { id: quiz.offeringId }, select: { teacherId: true } });
+    if (off && off.teacherId) realtime.emitTo(off.teacherId, 'result', { action: 'quiz-submitted', offeringId: quiz.offeringId });
+  } catch (_) { /* non-fatal */ }
 
   // Activity timeline (Req #7).
   try {

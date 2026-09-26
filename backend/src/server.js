@@ -164,6 +164,8 @@ app.use('/api/lms/academic', (req, res, next) => {
   next();
 });
 
+// Part A — PIN-gated Marks / Gradebook / Results Submission (mounted first).
+app.use('/api/lms/academic/teacher/marks', require('./routes/lms/academic/teacherMarks'));
 app.use('/api/lms/academic/teacher', lmsAcademicTeacherRoutes);
 app.use('/api/lms/academic/student', lmsAcademicStudentRoutes);
 // Enhanced coordinator modules + scheme builder MUST be mounted BEFORE the

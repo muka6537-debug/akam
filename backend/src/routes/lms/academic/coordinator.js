@@ -3000,8 +3000,9 @@ function shapeWeightage(course, w) {
     quizWeight: base.quizWeight != null ? base.quizWeight : 15,
     assignmentWeight: base.assignmentWeight != null ? base.assignmentWeight : 20,
     labTaskWeight: hasLab ? (base.labTaskWeight != null ? base.labTaskWeight : 0) : 0,
-    // Semester Project (lab) weightage — only meaningful for lab courses (Req 1.3).
-    semesterProjectWeight: hasLab ? (base.semesterProjectWeight != null ? base.semesterProjectWeight : 0) : 0,
+    // Project weightage (A1) — any subject may have a Project component; 0 = none.
+    semesterProjectWeight: base.semesterProjectWeight != null ? base.semesterProjectWeight : 0,
+    hasProject: Number(base.semesterProjectWeight || 0) > 0,
     quizCount: base.quizCount != null ? base.quizCount : 0,
     assignmentCount: base.assignmentCount != null ? base.assignmentCount : 0,
     labTaskCount: hasLab ? (base.labTaskCount != null ? base.labTaskCount : 0) : 0,
@@ -3084,8 +3085,8 @@ router.put('/weightage/:courseId', COORD, asyncHandler(async (req, res) => {
     assignmentWeight: num(b.assignmentWeight, 20),
     // Lab task weightage is only meaningful for lab courses; force 0 otherwise.
     labTaskWeight: hasLab ? num(b.labTaskWeight, 0) : 0,
-    // Semester Project (lab) weightage — lab courses only (Req 1.3).
-    semesterProjectWeight: hasLab ? num(b.semesterProjectWeight, 0) : 0,
+    // Project weightage (A1) — optional for any subject (0 = no Project component).
+    semesterProjectWeight: num(b.semesterProjectWeight, 0),
     quizCount: Math.trunc(num(b.quizCount, 0)),
     assignmentCount: Math.trunc(num(b.assignmentCount, 0)),
     labTaskCount: hasLab ? Math.trunc(num(b.labTaskCount, 0)) : 0,
