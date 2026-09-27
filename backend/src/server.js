@@ -331,6 +331,12 @@ app.use((err, req, res, next) => {
     const { installResultLockTriggers } = require('./utils/resultWorkflow');
     await prismaShared.$executeRawUnsafe(`UPDATE "CourseResult" SET "workflowStage"='OFFICIAL', "officialAt"=COALESCE("publishedAt", CURRENT_TIMESTAMP) WHERE "status"='PUBLISHED' AND "workflowStage"='DRAFT'`);
     await prismaShared.$executeRawUnsafe(`UPDATE "CourseResult" SET "workflowStage"='SUBMITTED' WHERE "status"='FINALIZED' AND "workflowStage"='DRAFT'`);
+    // Offerings whose every result already reached the Exam Controller are
+    // treated as published + submitted by the teacher (legacy data).
+    await prismaShared.$executeRawUnsafe(`UPDATE "CourseOffering" SET "resultLockedAt"=COALESCE("resultLockedAt", CURRENT_TIMESTAMP), "resultSubmittedAt"=COALESCE("resultSubmittedAt", CURRENT_TIMESTAMP)
+      WHERE "resultSubmittedAt" IS NULL
+        AND EXISTS (SELECT 1 FROM "CourseResult" r WHERE r."offeringId"="CourseOffering"."id")
+        AND NOT EXISTS (SELECT 1 FROM "CourseResult" r WHERE r."offeringId"="CourseOffering"."id" AND r."workflowStage" IN ('DRAFT','LOCKED'))`);
     await installResultLockTriggers(prismaShared);
     console.log('[startup-result-workflow] Stages back-filled, immutability triggers installed.');
   } catch (e) {

@@ -163,6 +163,23 @@ async function scopeStudents(stage, scope) {
  */
 async function declare(kind, scope, actorId) {
   const from = kind === 'unofficial' ? 'SUBMITTED' : 'UNOFFICIAL';
+  if (kind === 'unofficial') {
+    // Never half-declare a semester: every subject in the scope (current
+    // term, with enrolled students) must have been submitted by its teacher.
+    const term = await currentTerm();
+    const offerings = await prisma.courseOffering.findMany({
+      where: { isDeleted: false, ...(term ? { termId: term.id } : {}), registrations: { some: {} } },
+      include: { course: { include: { program: true, semester: true } } },
+    });
+    const pending = offerings.filter((o) => (o.course?.program?.department || '—') === scope.department
+      && (o.course?.program?.shortForm || o.course?.program?.code) === scope.program
+      && String(o.course?.semester?.number || '') === String(scope.semester)
+      && !o.resultSubmittedAt);
+    if (pending.length) {
+      const e = new Error(`Waiting for teacher submission: ${pending.map((o) => o.course.code).join(', ')}. All subjects of the semester must be submitted before declaring.`);
+      e.status = 409; e.expose = true; e.pending = pending.map((o) => o.course.code); throw e;
+    }
+  }
   const to = kind === 'unofficial' ? 'UNOFFICIAL' : 'OFFICIAL';
   const rows = await fetchResults([from], scope);
   if (!rows.length) {
