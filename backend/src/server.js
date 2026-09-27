@@ -178,6 +178,8 @@ app.use('/api/lms/academic/focal', lmsAcademicFocalRoutes);
 // Public transcript verification (no auth) — must be mounted before the
 // authenticated exam router so it isn't caught by lmsAuth.
 app.use('/api/lms/academic/exam-verify', lmsAcademicExamPublicRoutes);
+// Part A — Exam Controller result workflow + batch gazette (mounted first).
+app.use('/api/lms/academic/exam/workflow', require('./routes/lms/academic/examWorkflow'));
 app.use('/api/lms/academic/exam', lmsAcademicExamRoutes);
 app.use('/api/lms/academic/qec', lmsAcademicQecRoutes);
 app.use('/api/lms/academic/provost', lmsAcademicProvostRoutes);

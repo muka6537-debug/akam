@@ -221,15 +221,21 @@ async function previewResultGrades(offeringId, componentMarks) {
 // course/term info + GPA per term and CGPA.
 // ------------------------------------------------------------
 async function studentTranscript(studentId) {
-  const results = await prisma.courseResult.findMany({
-    where: { studentId, status: 'PUBLISHED' },
+  // A10 — per-semester gating: only semesters whose results were declared
+  // (unofficial or official) by the Exam Controller appear, using the same
+  // semester rule as the Results page (all subjects of the semester declared).
+  const record = await require('./resultsService').studentRecord(studentId);
+  const declaredSems = new Set(record.semesters.filter((s) => s.declared).map((s) => s.semester));
+  const allResults = await prisma.courseResult.findMany({
+    where: { studentId, workflowStage: { in: ['UNOFFICIAL', 'OFFICIAL'] } },
     include: {
       offering: {
-        include: { course: true, term: true },
+        include: { course: { include: { semester: true } }, term: true },
       },
     },
     orderBy: { createdAt: 'asc' },
   });
+  const results = allResults.filter((r) => declaredSems.has(r.offering?.course?.semester?.number || 0));
   const terms = {};
   const rows = [];
   for (const r of results) {

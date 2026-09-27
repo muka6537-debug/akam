@@ -1473,6 +1473,7 @@ router.get('/courses/:offeringId/gradebook', asyncHandler(async (req, res) => {
   res.json({
     offering: { id: offering.id, courseCode: offering.course.code, courseTitle: offering.course.title,
       hasLab: isLab,
+      midTotalMarks: offering.midTotalMarks, finalTotalMarks: offering.finalTotalMarks,
       weights: { assignment: offering.assignmentWeight, quiz: offering.quizWeight, mid: offering.midWeight, final: offering.finalWeight } },
     assignments: assignments.map((a) => ({
       id: a.id, title: a.title, totalMarks: a.totalMarks,
@@ -1490,7 +1491,59 @@ router.get('/courses/:offeringId/gradebook', asyncHandler(async (req, res) => {
       feedback: t.submissions[0] ? t.submissions[0].feedback : null,
       status: t.submissions[0] ? t.submissions[0].status : 'NOT_SUBMITTED',
     })),
-    result: result && result.status === 'PUBLISHED' ? result : null,
+    result: result && ['UNOFFICIAL', 'OFFICIAL'].includes(result.workflowStage) ? result : null,
+    // Part A — live weightage-converted breakdown (same engine as the teacher gradebook).
+    breakdown: await (async () => {
+      try {
+        const gbSvc = require('../../../services/gradebookService');
+        const gb = await gbSvc.buildGradebook(offeringId, { studentId });
+        return gb && gb.rows[0] ? gbSvc.studentBreakdown(gb, gb.rows[0]) : null;
+      } catch (_) { return null; }
+    })(),
+  });
+}));
+
+// ============================================================
+// PART A — STUDENT RESULT RECORD (A6 / A10)
+//  • Every subject across all enrolled semesters, grouped by semester.
+//  • Before a semester is declared: raw marks only (no grade/GPA/transcript).
+//  • After unofficial declaration: GPA, running CGPA, unofficial transcript.
+//  • After official declaration: official transcript.
+// ============================================================
+router.get('/result-record', asyncHandler(async (req, res) => {
+  const studentId = req.lmsUser.id;
+  const svc = require('../../../services/resultsService');
+  const gbSvc = require('../../../services/gradebookService');
+  const record = await svc.studentRecord(studentId);
+  // Attach the live weightage-converted breakdown (A3/A6) to every subject.
+  for (const sem of record.semesters) {
+    for (const sub of sem.subjects) {
+      try {
+        const gb = await gbSvc.buildGradebook(sub.offeringId, { studentId });
+        const row = gb && gb.rows[0];
+        sub.breakdown = row ? gbSvc.studentBreakdown(gb, row) : null;
+      } catch (_) { sub.breakdown = null; }
+    }
+  }
+  res.json(record);
+}));
+
+// Transcript PDF: kind = unofficial | official ; optional ?semester=N
+router.get('/transcript/pdf/:kind', asyncHandler(async (req, res) => {
+  const official = req.params.kind === 'official';
+  if (!['official', 'unofficial'].includes(req.params.kind)) throw httpError(400, 'kind must be official or unofficial');
+  const record = await require('../../../services/resultsService').studentRecord(req.lmsUser.id);
+  const semester = req.query.semester ? String(req.query.semester) : null;
+  const available = record.semesters.filter((s) => s.declared && (!official || s.official));
+  if (semester && !available.some((s) => String(s.semester) === semester)) {
+    throw httpError(403, official
+      ? `The official result for Semester ${semester} has not been declared yet.`
+      : `The result for Semester ${semester} has not been declared yet.`);
+  }
+  if (!available.length) throw httpError(403, official ? 'No official result has been declared yet.' : 'No semester result has been declared yet.');
+  await audit(req, 'TRANSCRIPT_DOWNLOAD', 'LmsUser', req.lmsUser.id, { after: { official, semester } });
+  require('../../../services/transcriptPdf').drawTranscript(res, record, {
+    official, semester, filename: `${official ? 'official' : 'unofficial'}-transcript${semester ? `-sem${semester}` : ''}`,
   });
 }));
 
