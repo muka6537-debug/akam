@@ -74,6 +74,26 @@ router.get('/summary', EXAM_OR_GOV, asyncHandler(async (req, res) => {
   });
 }));
 
+// ---------------- Gazette (A11) ----------------
+router.get('/gazette/batches', EXAM_OR_GOV, asyncHandler(async (req, res) => {
+  res.json({ batches: await svc.gazetteBatches() });
+}));
+router.get('/gazette', EXAM_OR_GOV, asyncHandler(async (req, res) => {
+  if (!req.query.batch) throw httpError(400, 'batch is required');
+  res.json(await svc.gazette(String(req.query.batch), { program: req.query.program || undefined }));
+}));
+router.get('/gazette/export/:format', EXAM_OR_GOV, asyncHandler(async (req, res) => {
+  if (!req.query.batch) throw httpError(400, 'batch is required');
+  const g = await svc.gazette(String(req.query.batch), { program: req.query.program || undefined });
+  const title = `Result Gazette — Batch: ${g.batch}`;
+  const subtitle = `Current Session: ${g.currentSession || '—'} · ${g.students.length} student(s)${req.query.program ? ` · ${req.query.program}` : ''}`;
+  const sections = X.gazetteSections(g);
+  await audit(req, 'EXAM_GAZETTE_EXPORT', 'Gazette', g.batch, { after: { format: req.params.format } });
+  if (req.params.format === 'excel') return X.excel(res, `gazette-${g.batch}`, title, subtitle, sections);
+  if (req.params.format === 'pdf') return X.pdf(res, `gazette-${g.batch}`, title, subtitle, sections);
+  throw httpError(400, 'format must be excel or pdf');
+}));
+
 // Department → Program → Semester → Subject tree for a stage.
 router.get('/:stage/tree', EXAM_OR_GOV, asyncHandler(async (req, res) => {
   const stage = stageParam(req);
@@ -141,26 +161,6 @@ router.get('/:stage/export/:format', EXAM_OR_GOV, asyncHandler(async (req, res) 
   await audit(req, 'EXAM_WORKFLOW_EXPORT', 'Stage', stage, { after: { format, scope } });
   if (format === 'excel') return X.excel(res, name, title, subtitle, sections);
   return X.pdf(res, name, title, subtitle, sections, { landscape: true });
-}));
-
-// ---------------- Gazette (A11) ----------------
-router.get('/gazette/batches', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  res.json({ batches: await svc.gazetteBatches() });
-}));
-router.get('/gazette', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  if (!req.query.batch) throw httpError(400, 'batch is required');
-  res.json(await svc.gazette(String(req.query.batch), { program: req.query.program || undefined }));
-}));
-router.get('/gazette/export/:format', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  if (!req.query.batch) throw httpError(400, 'batch is required');
-  const g = await svc.gazette(String(req.query.batch), { program: req.query.program || undefined });
-  const title = `Result Gazette — Batch: ${g.batch}`;
-  const subtitle = `Current Session: ${g.currentSession || '—'} · ${g.students.length} student(s)${req.query.program ? ` · ${req.query.program}` : ''}`;
-  const sections = X.gazetteSections(g);
-  await audit(req, 'EXAM_GAZETTE_EXPORT', 'Gazette', g.batch, { after: { format: req.params.format } });
-  if (req.params.format === 'excel') return X.excel(res, `gazette-${g.batch}`, title, subtitle, sections);
-  if (req.params.format === 'pdf') return X.pdf(res, `gazette-${g.batch}`, title, subtitle, sections);
-  throw httpError(400, 'format must be excel or pdf');
 }));
 
 module.exports = router;

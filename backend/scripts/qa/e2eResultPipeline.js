@@ -11,7 +11,7 @@
 // (teacher1) and is safe to re-run on a fresh seed. On a re-run the
 // already-submitted offering is detected and pipeline steps are skipped.
 // ============================================================
-const BASE = process.argv[2] || 'http://localhost:5000';
+const BASE = process.argv.slice(2).find((a) => /^https?:/.test(a)) || 'http://localhost:5000';
 const API = `${BASE}/api/lms/academic`;
 let pass = 0; let fail = 0;
 const ok = (cond, msg, extra) => { if (cond) { pass += 1; console.log(`  ✔ ${msg}`); } else { fail += 1; console.log(`  ✘ ${msg}`, extra !== undefined ? JSON.stringify(extra).slice(0, 300) : ''); } };
@@ -51,6 +51,28 @@ function client(token) {
   const stu = client(await login(student.username));
   const exam = client(await login('exam1'));
 
+  // ---- Fixture (test data only) -----------------------------------------
+  // The coordinator must belong to the offering's department (strict isolation);
+  // the seeded coord1 has none, so assign it like a Super Admin would.
+  const coordUser = await prisma.lmsUser.findUnique({ where: { username: 'coord1' } });
+  await prisma.lmsStudentProfile.updateMany({ where: { lmsUserId: coordUser.id }, data: { department: offering.course.program.department } });
+  // --fresh: reset this offering's demo results so the pipeline starts clean
+  // (drops the immutability triggers only for the duration of the reset).
+  if (process.argv.includes('--fresh')) {
+    const { installResultLockTriggers } = require('../../src/utils/resultWorkflow');
+    await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS trg_course_result_immutable_delete');
+    await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS trg_course_result_stage_forward');
+    await prisma.$executeRawUnsafe('DROP TRIGGER IF EXISTS trg_course_result_immutable_update');
+    // Reset the whole term: every result back to DRAFT, nothing submitted.
+    await prisma.courseResult.deleteMany({ where: { offeringId: { in: (await prisma.courseOffering.findMany({ where: { teacherId: teacherUser.id } })).map((o) => o.id) } } });
+    await prisma.courseResult.updateMany({ data: { workflowStage: 'DRAFT', status: 'DRAFT', lockedAt: null, submittedAt: null, unofficialAt: null, officialAt: null } });
+    await installResultLockTriggers(prisma);
+    await prisma.courseOffering.updateMany({ data: { resultLockedAt: null, resultSubmittedAt: null } });
+    await prisma.courseOffering.updateMany({ where: { teacherId: teacherUser.id }, data: { midTotalMarks: null, finalTotalMarks: null } });
+    await prisma.teacherMarksPin.deleteMany({});
+    offering.resultSubmittedAt = null;
+    console.log('  (fresh fixture: teacher1 results reset)');
+  }
   const alreadySubmitted = !!offering.resultSubmittedAt;
 
   console.log('\nA1 Coordinator weightage');
@@ -198,6 +220,31 @@ function client(token) {
     }
     r = await teacher.post('/teacher/marks/final-submit', { pin: '48213' });
     ok(r.status === 200, 'final submission to Exam Controller', r.data);
+  }
+
+  // Other teachers of the same semester submit their subjects too (a semester
+  // can only be declared once every subject in it has been submitted).
+  console.log('\nA8 Other semester teachers submit');
+  const semOfferings = await prisma.courseOffering.findMany({ where: { isDeleted: false, courseId: { not: offering.courseId }, course: { programId: offering.course.programId, semesterId: offering.course.semesterId }, registrations: { some: {} } }, include: { teacher: true, course: true } });
+  const otherTeachers = [...new Set(semOfferings.filter((o) => o.teacher && !o.resultSubmittedAt).map((o) => o.teacher.username))];
+  for (const uname of otherTeachers) {
+    const t = client(await login(uname));
+    const tu = await prisma.lmsUser.findUnique({ where: { username: uname } });
+    if (!(await prisma.teacherMarksPin.findUnique({ where: { lmsUserId: tu.id } }))) await t.post('/teacher/marks/pin/setup', { pin: '48213', confirmPin: '48213', password: 'Lms@1234' });
+    const u = await t.post('/teacher/marks/pin/unlock', { pin: '48213' });
+    t.setMarks(u.data.token);
+    const subs = (await t.get('/teacher/marks/submission')).data.subjects;
+    for (const s2 of subs.filter((x) => x.status === 'OPEN')) {
+      await t.put(`/teacher/marks/offerings/${s2.id}/exam-totals`, { midTotalMarks: 100, finalTotalMarks: 100 });
+      const gb = (await t.get(`/teacher/marks/offerings/${s2.id}/gradebook`)).data;
+      for (const row of gb.rows) {
+        await t.put(`/teacher/marks/offerings/${s2.id}/cell`, { kind: 'mid', studentId: row.studentId, marks: 55 + (row.studentId.charCodeAt(3) % 30) });
+        await t.put(`/teacher/marks/offerings/${s2.id}/cell`, { kind: 'final', studentId: row.studentId, marks: 50 + (row.studentId.charCodeAt(5) % 40) });
+      }
+      await t.post(`/teacher/marks/offerings/${s2.id}/publish`, { pin: '48213' });
+    }
+    const fs2 = await t.post('/teacher/marks/final-submit', { pin: '48213' });
+    ok(fs2.status === 200, `${uname} final-submitted ${subs.length} subject(s)`, fs2.data);
   }
 
   console.log('\nImmutability for every role');
