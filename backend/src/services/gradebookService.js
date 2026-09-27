@@ -74,13 +74,18 @@ async function buildGradebook(offeringOrId, opts = {}) {
 
   // ---- Column plan (A5: exactly the coordinator's categories) ----
   const categories = [];
+  const LEGACY = { assignment: ['assignmentMarks', 'assignmentMax'], quiz: ['quizMarks', 'quizMax'], lab: ['labMarks', 'labMax'] };
   const plan = (key, label, weight, limit, actual, cfgItems, getCell) => {
     if (!(weight > 0)) return;
     // Slots = coordinator count (hard limit). Legacy data (no config) → actual items.
     const slots = configured && limit > 0 ? limit : Math.max(actual.length, 1);
     const shares = itemWeights(weight, slots, cfgItems);
+    const fallback = !configured && actual.length === 0 && LEGACY[key] ? legacyAggregate(key, ...LEGACY[key]) : null;
     const items = shares.map((w, i) => {
       const a = actual[i] || null;
+      if (!a && fallback && i === 0) {
+        return { key: `${key}-legacy`, kind: key, id: null, label, itemWeight: round2(w), totalMarks: null, created: true, legacy: true, getCell: fallback };
+      }
       return {
         key: a ? `${key}-${a.id}` : `${key}-slot-${i + 1}`,
         kind: key, id: a ? a.id : null,
@@ -94,6 +99,14 @@ async function buildGradebook(offeringOrId, opts = {}) {
     categories.push({ key, label, weight: round2(weight), limit: configured ? limit : null, created: Math.min(actual.length, slots), items });
   };
   const subOf = (list, sid) => (list || []).find((s) => s.studentId === sid && s.marks != null);
+  // Legacy compatibility: when a category has NO actual items yet but the
+  // stored result carries an aggregate for it (older data entered directly
+  // as Assignment/Quiz/Lab marks), expose that aggregate as the single slot.
+  const legacyAggregate = (key, marksField, maxField) => (sid) => {
+    const r = resultMap[sid];
+    if (!r || !(Number(r[marksField]) > 0) || !(Number(r[maxField]) > 0)) return null;
+    return { obtained: Number(r[marksField]), total: Number(r[maxField]) };
+  };
   plan('assignment', 'Assignment', weights.assignmentWeight, counts.assignment, assignments, cw && cw.assignmentItems,
     (a, sid) => { const s = subOf(a.submissions, sid); return s ? { obtained: Number(s.marks), total: Number(a.totalMarks) } : null; });
   plan('quiz', 'Quiz', weights.quizWeight, counts.quiz, quizzes, cw && cw.quizItems,

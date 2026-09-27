@@ -51,7 +51,7 @@ function drawTranscript(res, record, { official = false, semester = null, filena
   const cols = [
     ['Course Code', 'courseCode', 0.13], ['Course Title', 'courseTitle', 0.35], ['Cr. Hrs', 'creditHours', 0.08, 'center'],
     ['Marks %', 'pct', 0.1, 'center'], ['Grade', 'letterGrade', 0.08, 'center'], ['Grade Point', 'gp', 0.12, 'center'],
-    ['Cr × GP', 'qp', 0.14, 'center'],
+    ['Cr x GP', 'qp', 0.14, 'center'],
   ].map(([h, k, w, a]) => ({ header: h, key: k, width: w * avail, align: a }));
 
   const sems = (record.semesters || []).filter((s) => s.declared
@@ -79,10 +79,10 @@ function drawTranscript(res, record, { official = false, semester = null, filena
   if (doc.y > doc.page.height - 160) doc.addPage();
   doc.font('Helvetica-Bold').fontSize(8).text('Grading Key (AUST Academic Rules §19.8)', left, doc.y, { width: avail });
   doc.font('Helvetica').fontSize(7.5).text([
-    'A: 85–100 = 4.00', 'A−: 80–84 = 4.00', 'B: 73–79 = 3.3–3.9', 'B−: 70–72 = 3.0–3.2', 'C: 63–69 = 2.3–2.9',
-    'C−: 60–62 = 2.0–2.2', 'D: 50–59 = 1.0–1.9', 'F: 0–49 = 0 (MPhil 0–59, PhD 0–64)', 'W: Withdrawn', 'I: Incomplete',
-  ].join('   ·   '), { width: avail });
-  doc.moveDown(0.3).text('GPA = Σ(Course Credit Hours × Grade Point) ÷ Total Semester Credit Hours.   CGPA = Σ(Credit Hours × Grade Point, all semesters) ÷ Total Credit Hours taken.', { width: avail });
+    'A: 85–100 = 4.00', 'A-: 80-84 = 4.00', 'B: 73–79 = 3.3–3.9', 'B-: 70-72 = 3.0-3.2', 'C: 63–69 = 2.3–2.9',
+    'C-: 60-62 = 2.0-2.2', 'D: 50–59 = 1.0–1.9', 'F: 0–49 = 0 (MPhil 0–59, PhD 0–64)', 'W: Withdrawn', 'I: Incomplete',
+  ].join('   |   '), { width: avail });
+  doc.moveDown(0.3).text('GPA = Sum(Course Credit Hours x Grade Point) / Total Semester Credit Hours.   CGPA = Sum(Credit Hours x Grade Point, all semesters) / Total Credit Hours taken.', { width: avail });
 
   doc.moveDown(2.4);
   const sy = doc.y;
