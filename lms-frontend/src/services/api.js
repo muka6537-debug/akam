@@ -10,10 +10,26 @@
 // ============================================================
 import authService, { API_BASE } from './authService';
 
+// ------------------------------------------------------------
+// A4 — Marks-module PIN session token. Held in MEMORY ONLY (never
+// localStorage/sessionStorage) so a refresh, new tab or re-open of the
+// Marks module always re-prompts for the PIN. Sent as X-Marks-Token; the
+// server returns a refreshed (sliding) token on every marks call.
+// ------------------------------------------------------------
+let marksToken = null;
+const marksListeners = new Set();
+export const marksSession = {
+  get: () => marksToken,
+  set: (t) => { marksToken = t || null; marksListeners.forEach((fn) => fn(marksToken)); },
+  clear: () => marksSession.set(null),
+  subscribe: (fn) => { marksListeners.add(fn); return () => marksListeners.delete(fn); },
+};
+
 async function request(path, { method = 'GET', body, isForm = false } = {}) {
   const token = authService.getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (marksToken) headers['X-Marks-Token'] = marksToken;
   let payload;
   if (isForm) {
     payload = body; // FormData — let the browser set Content-Type
@@ -21,10 +37,14 @@ async function request(path, { method = 'GET', body, isForm = false } = {}) {
     headers['Content-Type'] = 'application/json';
     payload = JSON.stringify(body);
   }
-  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload });
+  const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload, cache: 'no-store' });
+  const refreshed = res.headers.get('X-Marks-Token');
+  if (refreshed) marksToken = refreshed;
   let data = null;
   try { data = await res.json(); } catch (_) { data = null; }
   if (!res.ok) {
+    // Marks session missing/expired → re-lock the Marks module immediately.
+    if (res.status === 423 && data && data.code === 'MARKS_PIN_REQUIRED') marksSession.clear();
     if (res.status === 401) {
       // Session expired — clear and bounce to login.
       authService.logout(true);
@@ -51,10 +71,13 @@ async function download(path, filename = 'download') {
   const token = authService.getToken();
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (marksToken) headers['X-Marks-Token'] = marksToken;
   const res = await fetch(`${API_BASE}${path}`, { headers });
   if (!res.ok) {
     if (res.status === 401) authService.logout(true);
-    const err = new Error(`Download failed (${res.status})`);
+    let msg = `Download failed (${res.status})`;
+    try { const j = await res.json(); if (j && j.error) msg = j.error; } catch (_) { /* binary body */ }
+    const err = new Error(msg);
     err.status = res.status;
     throw err;
   }
@@ -877,6 +900,46 @@ const grievances = {
   escalate: (id, body = {}) => post(`/lms/academic/grievances/${id}/escalate`, body),
 };
 
-const api = { base: API_BASE, request, get, post, put, del, postForm, download, fileUrl, structure, student, teacher, coordinator, focal, exam, qec, provost, grievances };
+// ============================================================
+// PART A — Teacher Marks (PIN-gated), Exam Controller result
+// workflow + gazette, student result record + transcripts.
+// ============================================================
+const marks = {
+  pinStatus: () => get('/lms/academic/teacher/marks/pin/status'),
+  setupPin: (body) => post('/lms/academic/teacher/marks/pin/setup', body),
+  unlock: (pin) => post('/lms/academic/teacher/marks/pin/unlock', { pin }),
+  changePin: (body) => post('/lms/academic/teacher/marks/pin/change', body),
+  offerings: () => get('/lms/academic/teacher/marks/offerings'),
+  gradebook: (offeringId) => get(`/lms/academic/teacher/marks/offerings/${offeringId}/gradebook`),
+  setExamTotals: (offeringId, body) => put(`/lms/academic/teacher/marks/offerings/${offeringId}/exam-totals`, body),
+  saveCell: (offeringId, body) => put(`/lms/academic/teacher/marks/offerings/${offeringId}/cell`, body),
+  submission: () => get('/lms/academic/teacher/marks/submission'),
+  publishSubject: (offeringId, pin) => post(`/lms/academic/teacher/marks/offerings/${offeringId}/publish`, { pin }),
+  finalSubmit: (pin) => post('/lms/academic/teacher/marks/final-submit', { pin }),
+};
+
+const qs = (o = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(o).forEach(([k, v]) => { if (v != null && v !== '') q.set(k, v); });
+  const str = q.toString();
+  return str ? `?${str}` : '';
+};
+const workflow = {
+  summary: () => get('/lms/academic/exam/workflow/summary'),
+  tree: (stage) => get(`/lms/academic/exam/workflow/${stage}/tree`),
+  subject: (stage, offeringId) => get(`/lms/academic/exam/workflow/${stage}/subject/${offeringId}`),
+  students: (stage, scope) => get(`/lms/academic/exam/workflow/${stage}/students${qs(scope)}`),
+  declareUnofficial: (scope) => post('/lms/academic/exam/workflow/collection/declare-unofficial', { ...scope, confirm: true }),
+  declareOfficial: (scope) => post('/lms/academic/exam/workflow/finalizing/declare-official', { ...scope, confirm: true }),
+  exportStage: (stage, format, scope, name) => download(`/lms/academic/exam/workflow/${stage}/export/${format}${qs(scope)}`, `${name || stage}.${format === 'excel' ? 'xlsx' : 'pdf'}`),
+  gazetteBatches: () => get('/lms/academic/exam/workflow/gazette/batches'),
+  gazette: (batch, program) => get(`/lms/academic/exam/workflow/gazette${qs({ batch, program })}`),
+  exportGazette: (batch, format, program) => download(`/lms/academic/exam/workflow/gazette/export/${format}${qs({ batch, program })}`, `gazette-${batch}.${format === 'excel' ? 'xlsx' : 'pdf'}`),
+};
+
+student.resultRecord = () => get('/lms/academic/student/result-record');
+student.downloadTranscriptPdf = (kind, semester) => download(`/lms/academic/student/transcript/pdf/${kind}${semester ? `?semester=${semester}` : ''}`, `${kind}-transcript${semester ? `-sem${semester}` : ''}.pdf`);
+
+const api = { base: API_BASE, request, get, post, put, del, postForm, download, fileUrl, structure, student, teacher, coordinator, focal, exam, qec, provost, grievances, marks, workflow };
 export default api;
 export { fileUrl };
