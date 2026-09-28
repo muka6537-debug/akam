@@ -66,6 +66,7 @@ const teacherMenu = [
   { label: "Mid Term Exam", icon: "FileEdit", to: "/teacher/midterm" },
   { label: "Final Term Exam", icon: "FileCheck2", to: "/teacher/finalterm" },
   { label: "Marks", icon: "Award", to: "/teacher/marks" },
+  { label: "Results Submission", icon: "Send", to: "/teacher/results-submission", badge: "PIN", badgeColor: "violet" },
   { label: "Attendance", icon: "CalendarCheck", to: "/teacher/attendance" },
   { label: "Students", icon: "Users", to: "/teacher/students" },
   { label: "Course History", icon: "History", to: "/teacher/history" },

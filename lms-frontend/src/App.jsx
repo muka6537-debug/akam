@@ -58,6 +58,7 @@ import TeacherMessages from "./pages/teacher/TeacherMessages";
 import TeacherSettings from "./pages/teacher/TeacherSettings";
 import TeacherCourseHistory from "./pages/teacher/CourseHistory";
 import TeacherLabTasks from "./pages/teacher/TeacherLabTasks";
+import TeacherResultsSubmission from "./pages/teacher/ResultsSubmission";
 
 // Admin (Course Coordinator) pages
 import AdminDashboard from "./pages/admin/Dashboard";
@@ -334,6 +335,7 @@ function App() {
             />
           }
         />
+        <Route path="results-submission" element={<TeacherResultsSubmission />} />
         <Route path="library" element={<TeacherLibrary />} />
         <Route path="appeals" element={<TeacherAppeals />} />
         <Route path="midterm" element={<TeacherMidTerm />} />

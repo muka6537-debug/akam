@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
 import {
   ArrowLeft, Users, CalendarCheck, FileText, FileQuestion, Award, Megaphone,
-  Plus, Trash2, Save, CheckCircle2, Loader2, Eye, Upload, Download, X,
-  Sparkles, ClipboardList, FileSpreadsheet, FileDown, Search, Filter,
+  Plus, Trash2, Save, Loader2, Eye, Download,
+  Sparkles, FileSpreadsheet, FileDown, Search, Filter,
 } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
 import Badge from "../../components/common/Badge";
@@ -16,14 +15,15 @@ import { useToast } from "../../context/ToastContext";
 import useApi from "../../hooks/useApi";
 import useRealtime from "../../hooks/useRealtime";
 import api, { fileUrl } from "../../services/api";
+import MarksPinGate from "../../components/marks/MarksPinGate";
+import GradebookPanel from "../../components/marks/GradebookPanel";
 
 const TABS = [
   { key: "students", label: "Students", icon: Users },
   { key: "attendance", label: "Attendance", icon: CalendarCheck },
   { key: "assignments", label: "Assignments", icon: FileText },
   { key: "quizzes", label: "Quizzes", icon: FileQuestion },
-  { key: "marks", label: "Marks", icon: ClipboardList },
-  { key: "gradebook", label: "Gradebook", icon: Award },
+  { key: "marks", label: "Marks & Gradebook", icon: Award },
   { key: "announcements", label: "Announcements", icon: Megaphone },
 ];
 
@@ -37,8 +37,8 @@ const SCOPE_TABS = {
   attendance: ["attendance"],
   assignments: ["assignments"],
   quizzes: ["quizzes"],
-  marks: ["marks", "gradebook"],
-  gradebook: ["marks", "gradebook"],
+  marks: ["marks"],
+  gradebook: ["marks"],
   announcements: ["announcements"],
 };
 
@@ -116,8 +116,7 @@ const ManageOffering = () => {
           {tab === "attendance" && <AttendanceTab offeringId={offeringId} />}
           {tab === "assignments" && <AssignmentsTab offeringId={offeringId} />}
           {tab === "quizzes" && <QuizzesTab offeringId={offeringId} />}
-          {tab === "marks" && <MarksTab offeringId={offeringId} />}
-          {tab === "gradebook" && <GradebookTab offeringId={offeringId} />}
+          {(tab === "marks" || tab === "gradebook") && <MarksGradebookTab offeringId={offeringId} />}
           {tab === "announcements" && <AnnouncementsTab offeringId={offeringId} />}
         </>
       )}
@@ -801,248 +800,14 @@ function QuestionsModal({ quiz, onClose, onChange }) {
   );
 }
 
-/* ---------------- Marks (real-time per-student CRUD) ---------------- */
-function MarksTab({ offeringId }) {
-  const { toast } = useToast();
-  const { data, loading, error, reload } = useApi(() => api.teacher.gradebook(offeringId), [offeringId]);
-  const rows = useMemo(() => data?.rows || [], [data]);
-  const items = useMemo(() => data?.offering?.items || [], [data]);
-  const components = useMemo(() => data?.offering?.components || [
-    { key: "assignment", label: "Assignment", marksField: "assignmentMarks", maxField: "assignmentMax", weight: 0 },
-    { key: "quiz", label: "Quiz", marksField: "quizMarks", maxField: "quizMax", weight: 0 },
-    { key: "mid", label: "Mid", marksField: "midMarks", maxField: "midMax", weight: 0 },
-    { key: "final", label: "Final", marksField: "finalMarks", maxField: "finalMax", weight: 0 },
-  ], [data]);
-  // Prefer per-item columns (each Quiz / Assignment / Lab listed individually).
-  const columns = items.length
-    ? items
-    : components.map((c) => ({ ...c, itemWeight: c.weight, editable: true, kind: c.key }));
-  const [edit, setEdit] = useState(null); // studentId being edited
-  const [form, setForm] = useState({});
-  const [busy, setBusy] = useState(false);
-
-  const startEdit = (r) => {
-    setEdit(r.studentId);
-    const f = {};
-    columns.forEach((c) => { if (c.marksField) f[c.marksField] = r[c.marksField] ?? 0; });
-    setForm(f);
-  };
-
-  const save = async (r) => {
-    setBusy(true);
-    try {
-      await api.teacher.saveStudentMarks(offeringId, r.studentId, form);
-      toast("Marks saved — student notified", { type: "success" });
-      setEdit(null);
-      await reload();
-    } catch (e) { toast(e.message, { type: "error" }); }
-    finally { setBusy(false); }
-  };
-
-  const remove = async (r) => {
-    if (!window.confirm(`Delete recorded marks for ${r.name}?`)) return;
-    try { await api.teacher.deleteStudentMarks(offeringId, r.studentId); toast("Marks deleted", { type: "success" }); await reload(); }
-    catch (e) { toast(e.message, { type: "error" }); }
-  };
-
-  const cellDisplay = (r, col) => {
-    const cell = r.cells?.[col.key];
-    if (cell) {
-      if (cell.pending || cell.converted == null) return <span className="font-medium text-slate-400">Pending</span>;
-      return (
-        <span className="text-app">
-          {Number(cell.converted).toFixed(2)}
-          {cell.obtained != null && cell.total != null ? (
-            <span className="block text-[9px] font-normal text-muted-app">{cell.obtained}/{cell.total}</span>
-          ) : null}
-        </span>
-      );
-    }
-    const v = r[col.marksField];
-    if (v == null || (Number(v) === 0 && r.resultStatus !== "PUBLISHED")) return <span className="font-medium text-slate-400">Pending</span>;
-    return <span className="text-app">{v}</span>;
-  };
-
-  if (loading) return <Skeleton className="h-48 w-full rounded-2xl" />;
-  if (error) return <ErrorState description={error} onRetry={reload} />;
-  if (rows.length === 0) return <EmptyState icon="ClipboardList" title="No students" description="No enrolled students to record marks for." />;
-
+/* ---------------- Marks & Gradebook (Part A) ----------------
+   The legacy Marks + Gradebook tabs were merged into ONE PIN-gated
+   gradebook driven by the Course Coordinator's weightage (A3/A4/A5). */
+function MarksGradebookTab({ offeringId }) {
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-app">Each quiz, assignment and lab is listed individually. Converted marks = (obtained / total) × item weight, capped at the item weight. Mid / Final can be entered here.</p>
-      <div className="card-base overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr className="bg-slate-50 dark:bg-slate-900 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">
-            <th className="px-3 py-3">Student</th>
-            {columns.map((c) => (
-              <th key={c.key} className="px-3 py-3 text-center">{c.label}{(c.itemWeight != null || c.weight) ? <span className="block text-[9px] font-normal normal-case text-muted-app">wt {c.itemWeight ?? c.weight}</span> : null}</th>
-            ))}
-            <th className="px-3 py-3 text-center">Total</th><th className="px-3 py-3 text-center">Grade</th><th className="px-3 py-3 text-right">Actions</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => {
-              const editing = edit === r.studentId;
-              return (
-                <tr key={r.studentId} className="border-t border-slate-100 dark:border-slate-800">
-                  <td className="px-3 py-2"><p className="font-semibold text-app">{r.name}</p><p className="text-xs font-mono text-muted-app">{r.rollNumber}</p></td>
-                  {columns.map((c) => (
-                    <td key={c.key} className="px-3 py-2 text-center">
-                      {editing && c.editable && c.marksField ? (
-                        <input type="number" value={form[c.marksField] ?? ""} onChange={(e) => setForm({ ...form, [c.marksField]: e.target.value })} className="input-base w-16 text-center text-sm" />
-                      ) : cellDisplay(r, c)}
-                    </td>
-                  ))}
-                  <td className="px-3 py-2 text-center font-bold">{r.totalPercent != null ? r.totalPercent : "—"}</td>
-                  <td className="px-3 py-2 text-center">{r.letterGrade ? <Badge color={r.letterGrade === "F" ? "rose" : "emerald"}>{r.letterGrade}</Badge> : "—"}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    {editing ? (
-                      <>
-                        <button onClick={() => save(r)} disabled={busy} className="btn-primary text-xs mr-1">{busy ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save</button>
-                        <button onClick={() => setEdit(null)} className="btn-secondary text-xs">Cancel</button>
-                      </>
-                    ) : (
-                      <>
-                        <button onClick={() => startEdit(r)} className="text-primary-600 text-xs font-semibold hover:underline mr-3">{r.resultId ? "Edit" : "Add"}</button>
-                        {r.resultId && <button onClick={() => remove(r)} className="text-rose-600 text-xs hover:underline">Delete</button>}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- Gradebook ---------------- */
-function GradebookTab({ offeringId }) {
-  const { toast } = useToast();
-  const { data, loading, error, reload } = useApi(() => api.teacher.gradebook(offeringId), [offeringId]);
-  const rows = useMemo(() => data?.rows || [], [data]);
-  const items = useMemo(() => data?.offering?.items || [], [data]);
-  const components = useMemo(() => data?.offering?.components || [
-    { key: "assignment", label: "Assignment", marksField: "assignmentMarks", maxField: "assignmentMax", weight: 0 },
-    { key: "quiz", label: "Quiz", marksField: "quizMarks", maxField: "quizMax", weight: 0 },
-    { key: "mid", label: "Mid", marksField: "midMarks", maxField: "midMax", weight: 0 },
-    { key: "final", label: "Final", marksField: "finalMarks", maxField: "finalMax", weight: 0 },
-  ], [data]);
-  const columns = items.length
-    ? items
-    : components.map((c) => ({ ...c, itemWeight: c.weight, editable: true, kind: c.key }));
-  const [edits, setEdits] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-
-  useEffect(() => {
-    const init = {};
-    rows.forEach((r) => {
-      const e = {};
-      columns.forEach((c) => {
-        if (!c.editable || !c.marksField) return;
-        if (c.kind === "assignment") e[c.marksField] = r.assignmentMarks ?? r.computedAssignment ?? 0;
-        else if (c.kind === "quiz") e[c.marksField] = r.quizMarks ?? r.computedQuiz ?? 0;
-        else e[c.marksField] = r[c.marksField] ?? 0;
-      });
-      init[r.studentId] = e;
-    });
-    setEdits(init);
-  }, [rows, columns]);
-
-  const setVal = (sid, field, val) => setEdits((e) => ({ ...e, [sid]: { ...e[sid], [field]: val } }));
-
-  const save = async () => {
-    const results = rows.map((r) => {
-      const row = { studentId: r.studentId };
-      components.forEach((c) => {
-        const edited = edits[r.studentId]?.[c.marksField];
-        row[c.marksField] = edited != null && edited !== "" ? parseFloat(edited) : (parseFloat(r[c.marksField]) || 0);
-        row[c.maxField] = r[c.maxField] ?? 100;
-      });
-      return row;
-    });
-    setSaving(true);
-    try { const res = await api.teacher.saveResults(offeringId, results); toast(res.message || "Saved", { type: "success" }); await reload(); }
-    catch (e) { toast(e.message, { type: "error" }); }
-    finally { setSaving(false); }
-  };
-
-  const publish = async () => {
-    setPublishing(true);
-    try { const res = await api.teacher.publishResults(offeringId); toast(res.message || "Published", { type: "success" }); await reload(); }
-    catch (e) { toast(e.message, { type: "error" }); }
-    finally { setPublishing(false); }
-  };
-
-  const cellDisplay = (r, col) => {
-    const cell = r.cells?.[col.key];
-    if (cell) {
-      if (cell.pending || cell.converted == null) return <span className="font-medium text-slate-400">Pending</span>;
-      return (
-        <span className="text-app">
-          {Number(cell.converted).toFixed(2)}
-          {cell.obtained != null && cell.total != null ? (
-            <span className="block text-[9px] font-normal text-muted-app">{cell.obtained}/{cell.total}</span>
-          ) : null}
-        </span>
-      );
-    }
-    const v = r[col.marksField];
-    if (v == null || (Number(v) === 0 && r.resultStatus !== "PUBLISHED")) return <span className="font-medium text-slate-400">Pending</span>;
-    return <span className="text-app">{v}</span>;
-  };
-
-  if (loading) return <Skeleton className="h-48 w-full rounded-2xl" />;
-  if (error) return <ErrorState description={error} onRetry={reload} />;
-  if (rows.length === 0) return <EmptyState icon="Award" title="No students" description="No enrolled students to grade." />;
-
-  const badgeColors = { assignment: "blue", quiz: "purple", mid: "amber", final: "rose", lab: "indigo" };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-2">
-          {components.map((c) => (
-            <Badge key={c.key} color={badgeColors[c.key] || "slate"}>{c.label} {c.weight}%</Badge>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <button onClick={save} disabled={saving} className="btn-secondary text-sm">{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Draft</button>
-          <button onClick={publish} disabled={publishing} className="btn-primary text-sm">{publishing ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Publish</button>
-        </div>
-      </div>
-      <div className="card-base overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr className="bg-slate-50 dark:bg-slate-900 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">
-            <th className="px-3 py-3">Student</th>
-            {columns.map((c) => (
-              <th key={c.key} className="px-3 py-3 text-center">{c.label}{(c.itemWeight != null || c.weight) ? <span className="block text-[9px] font-normal normal-case text-muted-app">wt {c.itemWeight ?? c.weight}</span> : null}</th>
-            ))}
-            <th className="px-3 py-3 text-center">Total</th><th className="px-3 py-3 text-center">Grade</th><th className="px-3 py-3 text-center">Status</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.studentId} className="border-t border-slate-100 dark:border-slate-800">
-                <td className="px-3 py-2"><p className="font-semibold text-app">{r.name}</p><p className="text-xs font-mono text-muted-app">{r.rollNumber}</p></td>
-                {columns.map((c) => (
-                  <td key={c.key} className="px-3 py-2 text-center">
-                    {c.editable && c.marksField ? (
-                      <input type="number" value={edits[r.studentId]?.[c.marksField] ?? ""} onChange={(e) => setVal(r.studentId, c.marksField, e.target.value)} className="input-base w-16 text-center text-sm" />
-                    ) : cellDisplay(r, c)}
-                  </td>
-                ))}
-                <td className="px-3 py-2 text-center font-bold">{r.totalPercent != null ? r.totalPercent : "—"}</td>
-                <td className="px-3 py-2 text-center">{r.letterGrade ? <Badge color={r.letterGrade === "F" ? "rose" : "emerald"}>{r.letterGrade}</Badge> : "—"}</td>
-                <td className="px-3 py-2 text-center text-xs">{r.resultStatus ? <Badge color={r.resultStatus === "PUBLISHED" ? "emerald" : "slate"} size="sm">{r.resultStatus.toLowerCase()}</Badge> : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-app">Quiz / Assignment / Lab columns are converted from real submissions ((obtained / total) × item weight, capped). Mid &amp; Final can be entered, then Save Draft and Publish when ready.</p>
-    </div>
+    <MarksPinGate title="Marks & Gradebook">
+      <GradebookPanel offeringId={offeringId} />
+    </MarksPinGate>
   );
 }
 
