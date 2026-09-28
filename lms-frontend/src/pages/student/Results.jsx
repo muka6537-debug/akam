@@ -1,360 +1,211 @@
-import { motion, AnimatePresence } from "framer-motion";
-import { Download, FileText, Award, FlaskConical, ChevronDown, Loader2, RefreshCw } from "lucide-react";
-import { useMemo, useState, useEffect, useRef, Fragment } from "react";
+import { Fragment, useMemo, useState } from "react";
+import { Award, ChevronDown, Download, FileText, Loader2, Lock, RefreshCw, ShieldCheck, Hourglass, CalendarClock } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
 import { Skeleton } from "../../components/common/Skeleton";
 import ErrorState from "../../components/common/ErrorState";
 import EmptyState from "../../components/common/EmptyState";
 import useApi from "../../hooks/useApi";
+import useRealtime from "../../hooks/useRealtime";
 import api from "../../services/api";
 import { useToast } from "../../context/ToastContext";
 
-const Results = () => {
-  const { toast } = useToast();
-  const { data, loading, error, reload } = useApi(() => api.student.transcript(), []);
-  // Req 3.3 — lab task marks are attached per result by the /results endpoint.
-  const { data: resultsData, reload: reloadResults } = useApi(() => api.student.results(), []);
-  // Task 4 — auto-generated, weightage-driven results table for EVERY enrolled
-  // course (zero-state 0s before publish). Used to render the results table
-  // even when the transcript has no published terms yet.
-  const { data: allData, reload: reloadAll } = useApi(() => api.student.resultsAll(), []);
-  const [active, setActive] = useState(0);
+/* =============================================================
+   Student — Results & Transcripts (A6 / A10)
+   • All subjects across all enrolled semesters, grouped by semester.
+   • Before a semester's unofficial result is declared: only the raw
+     marks uploaded by teachers (Obtained / Total + weightage) — no
+     grade, GPA or transcript. This is informational, not the result.
+   • After UNOFFICIAL declaration: grade, GPA, running CGPA and the
+     unofficial transcript (download) for that semester.
+   • After OFFICIAL declaration: the official transcript.
+   • Gating is per semester and independent.
+   • Updates in real time as teachers grade.
+   ============================================================= */
+const fmt = (v, d = 2) => (v == null ? "—" : Number(v).toFixed(d));
+const STATUS = {
+  IN_PROGRESS: { label: "Result not declared", icon: Hourglass, cls: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300" },
+  UNOFFICIAL: { label: "Unofficial result declared", icon: FileText, cls: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300" },
+  OFFICIAL: { label: "Official result", icon: ShieldCheck, cls: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" },
+};
 
-  // ----------------------------------------------------------------
-  // MANUAL REFRESH ONLY (client requirement 1.3).
-  // The Results page must NOT refresh by itself. All automatic refresh
-  // mechanisms have been removed — no polling interval, no focus/online/
-  // visibility auto-reload, no `aust:refresh` listener and no Server-Sent
-  // Events auto-reload. The page loads its data once on mount (via useApi)
-  // and only re-fetches when the user explicitly clicks the Refresh button.
-  const [refreshing, setRefreshing] = useState(false);
-  const reloadAllSources = useMemo(
-    () => async () => {
-      setRefreshing(true);
-      try {
-        await Promise.all([reload(), reloadResults(), reloadAll()]);
-      } finally {
-        setRefreshing(false);
-      }
-    },
-    [reload, reloadResults, reloadAll]
+function Breakdown({ b }) {
+  if (!b || !b.components?.length) return <p className="text-xs text-muted-app">No assessment plan configured yet.</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-xs">
+        <thead>
+          <tr className="text-[10px] uppercase text-slate-500">
+            <th className="px-2 py-1.5 text-left">Assessment</th>
+            <th className="px-2 py-1.5 text-center">Obtained / Total</th>
+            <th className="px-2 py-1.5 text-center">Weightage</th>
+            <th className="px-2 py-1.5 text-center">Converted</th>
+          </tr>
+        </thead>
+        <tbody>
+          {b.components.map((c) => (
+            <tr key={c.key} className="border-t border-slate-100 dark:border-slate-800">
+              <td className="px-2 py-1.5 font-semibold text-app">{c.label}</td>
+              <td className="px-2 py-1.5 text-center">{c.obtained == null ? <span className="text-slate-400">Pending</span> : `${c.obtained} / ${c.total ?? "—"}`}</td>
+              <td className="px-2 py-1.5 text-center">{fmt(c.weight)}%</td>
+              <td className="px-2 py-1.5 text-center font-bold text-primary-700 dark:text-primary-300">{c.weightedMarks == null ? "—" : fmt(c.weightedMarks)}</td>
+            </tr>
+          ))}
+          <tr className="border-t-2 border-slate-200 dark:border-slate-700 font-bold">
+            <td className="px-2 py-1.5">Total so far</td><td /><td className="px-2 py-1.5 text-center">{fmt(b.totalWeight)}</td>
+            <td className="px-2 py-1.5 text-center text-primary-700 dark:text-primary-300">{fmt(b.weightedTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
+}
 
-  // Download menu (Req 3.4 — replaces Print) + in-flight indicator.
-  const [dlOpen, setDlOpen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const dlRef = useRef(null);
-  // Expanded lab-task marks per result row.
+export default function Results() {
+  const { toast } = useToast();
+  const { data, loading, error, reload } = useApi(() => api.student.resultRecord(), []);
+  const [active, setActive] = useState(null);
   const [expanded, setExpanded] = useState({});
+  const [busy, setBusy] = useState(null);
 
-  // Task 4 — prefer the real transcript (graded/published terms). When it is
-  // empty, fall back to the auto-generated weightage-driven table so every
-  // enrolled course still shows up with 0s (zero-state) instead of an empty
-  // page. The two shapes are compatible (termCode / termTitle / rows[]).
-  const transcriptTerms = useMemo(() => data?.terms || [], [data]);
-  const allTerms = useMemo(() => allData?.terms || [], [allData]);
-  const usingZeroState = transcriptTerms.length === 0 && allTerms.length > 0;
-  // Normalize zero-state terms so they carry the same fields the render path
-  // expects (gpa / totalCredits), defaulting to 0 until marks are published.
-  const terms = useMemo(() => {
-    if (!usingZeroState) return transcriptTerms;
-    return allTerms.map((t) => ({
-      ...t,
-      gpa: t.gpa ?? 0,
-      totalCredits: (t.rows || []).reduce((s, r) => s + (Number(r.creditHours) || 0), 0),
-    }));
-  }, [usingZeroState, transcriptTerms, allTerms]);
-  const current = terms[active] || null;
+  // Real-time: grading / declarations push an update.
+  useRealtime(api.student.eventsUrl, { result: () => reload(), weightage: () => reload() }, []);
 
-  // Map resultId → lab info so each transcript row can surface its lab tasks.
-  const labByResult = useMemo(() => {
-    const m = {};
-    for (const r of resultsData?.results || []) {
-      if (r.hasLab) m[r.id] = r.labTasks || [];
-    }
-    return m;
-  }, [resultsData]);
+  const semesters = useMemo(() => data?.semesters || [], [data]);
+  const current = semesters.find((s) => s.semester === active) || semesters[semesters.length - 1] || null;
 
-  // Point 7 — map resultId → dynamic weightage-driven breakdown so each
-  // course row can expand into a table of exactly the categories/items the
-  // Course Coordinator configured (nothing hard-coded).
-  const breakdownByResult = useMemo(() => {
-    const m = {};
-    for (const r of resultsData?.results || []) {
-      if (r.breakdown) m[r.id] = r.breakdown;
-    }
-    // Task 4 — also index the auto-generated (zero-state / pending) breakdowns
-    // so pending courses can expand into their weightage-driven table too.
-    for (const t of allData?.terms || []) {
-      for (const row of t.rows || []) {
-        if (row.breakdown && m[row.resultId] == null) m[row.resultId] = row.breakdown;
-      }
-    }
-    return m;
-  }, [resultsData, allData]);
-
-  // Close the download menu on outside click.
-  useEffect(() => {
-    const onDoc = (e) => { if (dlRef.current && !dlRef.current.contains(e.target)) setDlOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  const runDownload = async (fn) => {
-    setDownloading(true);
-    setDlOpen(false);
-    try {
-      await fn();
-      toast("Download started", "success");
-    } catch (e) {
-      toast(e?.message || "Download failed", "error");
-    } finally {
-      setDownloading(false);
-    }
+  const dl = async (kind, semester) => {
+    setBusy(`${kind}-${semester || "all"}`);
+    try { await api.student.downloadTranscriptPdf(kind, semester); }
+    catch (e) { toast(e.message, { type: "error" }); }
+    finally { setBusy(null); }
   };
 
-  if (loading) {
-    return (
-      <div>
-        <PageHeader title="Results & Transcripts" subtitle="Loading your academic record…" icon="Award" breadcrumb={["Dashboard", "Results"]} />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}
-        </div>
-        <Skeleton className="h-64 w-full rounded-2xl" />
-      </div>
-    );
-  }
+  if (loading) return <div><PageHeader title="Results & Transcripts" icon="Award" /><Skeleton className="h-64 w-full rounded-2xl" /></div>;
+
+  const declared = semesters.filter((s) => s.declared);
+  const anyOfficial = semesters.some((s) => s.official);
 
   return (
     <div>
       <PageHeader
         title="Results & Transcripts"
-        subtitle="Semester-wise marks for your enrolled courses"
+        subtitle="Semester-wise marks, GPA, CGPA and transcripts"
         icon="Award"
         breadcrumb={["Dashboard", "Results"]}
         actions={
-          <div className="flex items-center gap-2">
-          {/* Manual refresh (client requirement 1.3) — the page never
-              refreshes on its own; the user triggers a re-fetch here. */}
-          <button
-            onClick={reloadAllSources}
-            disabled={refreshing}
-            title="Refresh results"
-            className="btn-secondary text-sm py-2 px-3 inline-flex items-center gap-1 disabled:opacity-60"
-          >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} /> Refresh
-          </button>
-          {/* Req 3.4 — Download replaces Print across the Results module.
-             Covers full/cumulative transcript, the selected semester result,
-             and every previous session/semester (per-term). */}
-          <div className="relative" ref={dlRef}>
-            <button
-              onClick={() => setDlOpen((o) => !o)}
-              disabled={downloading || terms.length === 0}
-              className="btn-secondary text-sm py-2 px-3 inline-flex items-center gap-1 disabled:opacity-60"
-            >
-              {downloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Download
-              <ChevronDown size={13} className={`transition ${dlOpen ? "rotate-180" : ""}`} />
-            </button>
-            <AnimatePresence>
-              {dlOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  className="absolute right-0 mt-2 w-72 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden"
-                >
-                  <button
-                    onClick={() => runDownload(() => api.student.downloadTranscript("transcript.pdf"))}
-                    className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800"
-                  >
-                    <FileText size={15} className="text-primary-600" /> Full Transcript (all semesters)
-                  </button>
-                  <button
-                    onClick={() => runDownload(() => api.student.downloadResults("results-cumulative.pdf"))}
-                    className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800"
-                  >
-                    <Award size={15} className="text-emerald-600" /> Overall / Cumulative Result
-                  </button>
-                  {current && (
-                    <button
-                      onClick={() => runDownload(() => api.student.downloadTermResult(current.termCode, `result-${current.termCode}.pdf`))}
-                      className="w-full text-left px-4 py-3 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 border-b border-slate-100 dark:border-slate-800"
-                    >
-                      <FileText size={15} className="text-blue-600" /> This Semester ({current.termTitle})
-                    </button>
-                  )}
-                  {terms.length > 1 && (
-                    <div className="max-h-56 overflow-y-auto">
-                      <p className="px-4 pt-2 pb-1 text-[10px] font-bold uppercase tracking-wide text-muted-app">Previous Sessions / Semesters</p>
-                      {terms.map((t) => (
-                        <button
-                          key={t.termCode}
-                          onClick={() => runDownload(() => api.student.downloadTermResult(t.termCode, `result-${t.termCode}.pdf`))}
-                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2"
-                        >
-                          <Download size={14} className="text-slate-500" /> {t.termTitle}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={reload} className="btn-secondary text-sm"><RefreshCw size={14} /> Refresh</button>
+            <button disabled={!declared.length || !!busy} onClick={() => dl("unofficial")} className="btn-secondary text-sm disabled:opacity-50">{busy === "unofficial-all" ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Unofficial Transcript</button>
+            <button disabled={!anyOfficial || !!busy} onClick={() => dl("official")} className="btn-primary text-sm disabled:opacity-50">{busy === "official-all" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />} Official Transcript</button>
           </div>
         }
       />
 
-      {error ? (
-        <ErrorState description={error} onRetry={reload} />
-      ) : terms.length === 0 ? (
-        <EmptyState icon="Award" title="No courses yet" description="Your results table will appear here automatically once you are enrolled in courses." />
+      {error ? <ErrorState description={error} onRetry={reload} /> : !semesters.length ? (
+        <EmptyState icon="Award" title="No courses yet" description="Your results appear here automatically once you are enrolled in courses." />
       ) : (
         <>
-          {usingZeroState && (
-            <div className="mb-5 rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 flex items-start gap-3">
-              <Award size={18} className="text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">Results not published yet</p>
-                <p className="text-xs text-amber-700/90 dark:text-amber-300/80">
-                  Each assessment shows <span className="font-semibold">Pending</span> until your instructor uploads marks — click <span className="font-semibold">Refresh</span> to pull the latest values.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Term selector — no GPA shown to students */}
-          <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
-            {terms.map((t, i) => (
-              <button
-                key={t.termCode}
-                onClick={() => setActive(i)}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap ${active === i ? "bg-primary-600 text-white shadow-lg" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-primary-300"}`}
-              >
-                {t.termTitle}
-              </button>
-            ))}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <div className="card-base p-4"><p className="text-[11px] uppercase font-bold text-muted-app">Batch</p><p className="font-bold text-app text-lg">{data.profile?.batch || "—"}</p></div>
+            <div className="card-base p-4"><p className="text-[11px] uppercase font-bold text-muted-app flex items-center gap-1"><CalendarClock size={11} /> Current Session</p><p className="font-bold text-app text-lg">{data.currentSession || "—"}</p></div>
+            <div className="card-base p-4"><p className="text-[11px] uppercase font-bold text-muted-app">CGPA</p><p className="font-bold text-primary-700 dark:text-primary-300 text-2xl">{data.cgpa != null ? fmt(data.cgpa) : "—"}</p><p className="text-[10px] text-muted-app">{declared.length ? `through Semester ${declared[declared.length - 1].semester}` : "after the first declared result"}</p></div>
+            <div className="card-base p-4"><p className="text-[11px] uppercase font-bold text-muted-app">Credits earned</p><p className="font-bold text-app text-lg">{data.creditsEarned || 0}</p></div>
           </div>
 
-          {/* Detail table */}
-          {current && (
-            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-soft">
-              <div className="px-5 py-4 bg-gradient-to-r from-primary-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 border-b border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-display font-bold text-lg text-slate-900 dark:text-slate-100">{current.termTitle}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{current.rows.length} courses · {current.totalCredits} credit hours</p>
+          <div className="flex gap-2 mb-4 overflow-x-auto no-scrollbar">
+            {semesters.map((s) => {
+              const st = STATUS[s.status];
+              return (
+                <button key={s.semester} onClick={() => setActive(s.semester)}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap flex items-center gap-1.5 ${current?.semester === s.semester ? "bg-primary-600 text-white shadow-lg" : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"}`}>
+                  <st.icon size={13} /> Semester {s.semester}
+                </button>
+              );
+            })}
+          </div>
+
+          {current && (() => {
+            const st = STATUS[current.status];
+            return (
+              <div className="card-base overflow-hidden">
+                <div className="px-5 py-4 bg-gradient-to-r from-primary-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="font-display font-bold text-lg text-app">Semester {current.semester}{current.term ? ` · ${current.term}` : ""}</p>
+                    <p className="text-xs text-muted-app">{current.subjects.length} subject(s) · {current.credits} credit hours</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${st.cls}`}><st.icon size={12} /> {st.label}</span>
+                  {current.declared && (
+                    <div className="flex gap-2">
+                      <button onClick={() => dl("unofficial", current.semester)} disabled={!!busy} className="btn-secondary text-xs">{busy === `unofficial-${current.semester}` ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Unofficial transcript</button>
+                      {current.official && <button onClick={() => dl("official", current.semester)} disabled={!!busy} className="btn-primary text-xs">{busy === `official-${current.semester}` ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />} Official transcript</button>}
+                    </div>
+                  )}
+                </div>
+
+                {!current.declared && (
+                  <div className="px-5 py-3 text-xs text-amber-800 dark:text-amber-200 bg-amber-50/70 dark:bg-amber-950/20 flex items-center gap-2">
+                    <Lock size={13} /> Live marks uploaded by your teachers — for information only. Grades, GPA and the transcript for this semester appear once the Exam Controller declares the result.
+                  </div>
+                )}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-[11px] uppercase text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Code</th><th className="px-3 py-2 text-left">Course</th><th className="px-3 py-2 text-center">Cr.</th>
+                        <th className="px-3 py-2 text-center">Mid (Obt / Total)</th><th className="px-3 py-2 text-center">Final (Obt / Total)</th>
+                        <th className="px-3 py-2 text-center">Marks</th>
+                        {current.declared && <><th className="px-3 py-2 text-center">Grade</th><th className="px-3 py-2 text-center">GP</th></>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {current.subjects.map((x) => {
+                        const b = x.breakdown;
+                        const mid = b?.components?.find((c) => c.category === "mid");
+                        const fin = b?.components?.find((c) => c.category === "final");
+                        const open = !!expanded[x.offeringId];
+                        return (
+                          <Fragment key={x.offeringId}>
+                            <tr className="border-t border-slate-100 dark:border-slate-800">
+                              <td className="px-3 py-2.5 font-mono font-bold text-primary-700 dark:text-primary-300">{x.courseCode}</td>
+                              <td className="px-3 py-2.5 font-semibold text-app">
+                                {x.courseTitle}
+                                <button onClick={() => setExpanded((m) => ({ ...m, [x.offeringId]: !m[x.offeringId] }))} className="ml-2 text-[11px] text-primary-600 hover:underline inline-flex items-center gap-0.5">
+                                  {open ? "Hide" : "View"} marks <ChevronDown size={12} className={open ? "rotate-180" : ""} />
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5 text-center">{x.creditHours}</td>
+                              <td className="px-3 py-2.5 text-center">{mid ? (mid.obtained == null ? "Pending" : `${mid.obtained} / ${mid.total ?? x.midTotalMarks ?? "—"}`) : "—"}</td>
+                              <td className="px-3 py-2.5 text-center">{fin ? (fin.obtained == null ? "Pending" : `${fin.obtained} / ${fin.total ?? x.finalTotalMarks ?? "—"}`) : "—"}</td>
+                              <td className="px-3 py-2.5 text-center font-bold">{b ? `${fmt(b.weightedTotal)} / ${fmt(b.totalWeight, 0)}` : "—"}</td>
+                              {current.declared && <><td className="px-3 py-2.5 text-center font-bold text-primary-700 dark:text-primary-300">{x.letterGrade}</td><td className="px-3 py-2.5 text-center">{fmt(x.gradePoints)}</td></>}
+                            </tr>
+                            {open && <tr className="bg-slate-50/60 dark:bg-slate-900/40"><td colSpan={current.declared ? 8 : 6} className="px-5 py-3"><Breakdown b={b} /></td></tr>}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                    {current.declared && (
+                      <tfoot>
+                        <tr className="bg-gradient-to-r from-primary-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 font-bold">
+                          <td colSpan={2} className="px-3 py-3">Semester GPA <span className="text-primary-700 dark:text-primary-300 ml-1">{fmt(current.gpa)}</span></td>
+                          <td className="px-3 py-3 text-center">{current.credits}</td>
+                          <td colSpan={3} className="px-3 py-3 text-right">Cumulative CGPA</td>
+                          <td colSpan={2} className="px-3 py-3 text-center text-primary-700 dark:text-primary-300">{fmt(current.cgpa)}</td>
+                        </tr>
+                        {current.probation?.onProbation && (
+                          <tr><td colSpan={8} className="px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 dark:bg-rose-500/10">Academic standing: {current.probation.label} (semester GPA below {current.probation.threshold.toFixed(2)})</td></tr>
+                        )}
+                      </tfoot>
+                    )}
+                  </table>
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-900 text-left text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase">
-                      <th className="px-3 py-3">Code</th>
-                      <th className="px-3 py-3">Course Title</th>
-                      <th className="px-3 py-3 text-center">Cr.Hr</th>
-                      <th className="px-3 py-3 text-center">Marks</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {current.rows.map((s) => {
-                      const labTasks = labByResult[s.resultId] || [];
-                      const isLab = labTasks.length > 0;
-                      // Point 7 — dynamic breakdown from coordinator weightage.
-                      const breakdown = breakdownByResult[s.resultId] || null;
-                      const comps = breakdown ? (breakdown.components || breakdown.categories || []) : [];
-                      const hasBreakdown = comps.length > 0;
-                      const isOpen = !!expanded[s.resultId];
-                      const anyGraded = comps.some((c) => c.weightedMarks != null);
-                      const courseMarks = anyGraded
-                        ? Number(breakdown.weightedTotal ?? comps.reduce((sum, c) => sum + (Number(c.weightedMarks) || 0), 0)).toFixed(2)
-                        : "Pending";
-                      return (
-                        <Fragment key={s.resultId}>
-                          <tr className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900">
-                            <td className="px-3 py-3 font-mono font-bold text-primary-700">
-                              {s.courseCode}
-                              {isLab && <span className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-indigo-600 dark:text-indigo-400"><FlaskConical size={10} /> LAB</span>}
-                            </td>
-                            <td className="px-3 py-3 font-semibold text-slate-900 dark:text-slate-100">
-                              {s.courseTitle}
-                              {hasBreakdown && (
-                                <button
-                                  onClick={() => setExpanded((m) => ({ ...m, [s.resultId]: !m[s.resultId] }))}
-                                  className="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold text-primary-600 dark:text-primary-400 hover:underline"
-                                >
-                                  {isOpen ? "Hide" : "View"} marks breakdown
-                                  <ChevronDown size={12} className={`transition ${isOpen ? "rotate-180" : ""}`} />
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-3 py-3 text-center">{s.creditHours}</td>
-                            <td className="px-3 py-3 text-center font-bold text-slate-900 dark:text-slate-100">
-                              {courseMarks === "Pending" ? <span className="font-medium text-slate-400">Pending</span> : courseMarks}
-                            </td>
-                          </tr>
-                          {hasBreakdown && isOpen && (
-                            <tr className="bg-primary-50/40 dark:bg-slate-950/40">
-                              <td colSpan="4" className="px-5 py-3">
-                                <p className="text-[11px] font-bold uppercase tracking-wide text-primary-700 dark:text-primary-300 mb-2 flex items-center gap-1">
-                                  <Award size={13} /> Assessment Breakdown
-                                </p>
-                                <div className="overflow-x-auto">
-                                  <table className="min-w-full text-xs border-separate border-spacing-0">
-                                    <thead>
-                                      <tr className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">
-                                        <th className="px-3 py-2 text-center border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">S.No.</th>
-                                        <th className="px-3 py-2 text-left border-b border-slate-200 dark:border-slate-700 min-w-48">Course</th>
-                                        {comps.map((component) => (
-                                          <th key={component.key} className="px-3 py-2 text-center border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">
-                                            {component.label}
-                                          </th>
-                                        ))}
-                                        <th className="px-3 py-2 text-center border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">Total</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      <tr className="bg-white/70 dark:bg-slate-900/50">
-                                        <td className="px-3 py-3 text-center font-semibold text-slate-700 dark:text-slate-300">1</td>
-                                        <td className="px-3 py-3 font-semibold text-slate-900 dark:text-slate-100">
-                                          {breakdown.courseCode} — {breakdown.courseTitle}
-                                        </td>
-                                        {comps.map((component) => (
-                                          <td key={component.key} className="px-3 py-3 text-center font-bold text-slate-900 dark:text-slate-100">
-                                            {component.weightedMarks == null ? (
-                                              <span className="font-medium text-slate-400">Pending</span>
-                                            ) : Number(component.weightedMarks).toFixed(2)}
-                                          </td>
-                                        ))}
-                                        <td className="px-3 py-3 text-center font-extrabold text-primary-700 dark:text-primary-400">
-                                          {anyGraded ? Number(breakdown.weightedTotal ?? comps.reduce((sum, c) => sum + (Number(c.weightedMarks) || 0), 0)).toFixed(2) : <span className="font-medium text-slate-400">Pending</span>}
-                                        </td>
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-gradient-to-r from-primary-50 to-blue-50 dark:from-slate-800 dark:to-slate-800 font-bold text-slate-900 dark:text-slate-100">
-                      <td colSpan="2" className="px-3 py-3">TERM SUMMARY</td>
-                      <td className="px-3 py-3 text-center">{current.totalCredits}</td>
-                      <td className="px-3 py-3 text-center text-muted-app font-medium">{current.rows.length} course{current.rows.length === 1 ? "" : "s"}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          )}
+            );
+          })()}
+          <p className="text-[11px] text-muted-app mt-3 flex items-center gap-1"><Award size={12} /> GPA = Σ(credit hours × grade point) ÷ semester credit hours · CGPA across all declared semesters (official AUST scale).</p>
         </>
       )}
     </div>
   );
-};
-
-export default Results;
+}
