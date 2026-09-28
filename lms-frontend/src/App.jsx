@@ -119,9 +119,9 @@ import ExamActivityLogs from "./pages/exam/ActivityLogs";
 import ExamSettings from "./pages/exam/Settings";
 import ExamUFM from "./pages/exam/UFMCases";
 import ExamAbsentees from "./pages/exam/Absentees";
-import ExamMarksCorrection from "./pages/exam/MarksCorrection";
 import ExamIncomplete from "./pages/exam/Incomplete";
-import ExamGazette from "./pages/exam/Gazette";
+import ExamResultWorkflow from "./pages/exam/ResultWorkflow";
+import ExamBatchGazette from "./pages/exam/BatchGazette";
 import ExamProbation from "./pages/exam/Probation";
 import ExamSeating from "./pages/exam/Seating";
 import ExamGrievances from "./pages/exam/Grievances";
@@ -431,9 +431,14 @@ function App() {
         <Route path="tracking" element={<ExamTracking />} />
         <Route path="ufm" element={<ExamUFM />} />
         <Route path="absentees" element={<ExamAbsentees />} />
-        <Route path="results-compilation" element={<ExamMarksCorrection />} />
+        {/* A9 — four sequential result stages (old flat "Results Compilation" replaced) */}
+        <Route path="result-compilation" element={<ExamResultWorkflow key="compilation" stage="compilation" />} />
+        <Route path="results-collection" element={<ExamResultWorkflow key="collection" stage="collection" />} />
+        <Route path="result-finalizing" element={<ExamResultWorkflow key="finalizing" stage="finalizing" />} />
+        <Route path="results-archive" element={<ExamResultWorkflow key="archive" stage="archive" />} />
+        <Route path="results-compilation" element={<Navigate to="/exam/result-compilation" replace />} />
         <Route path="incomplete" element={<ExamIncomplete />} />
-        <Route path="gazette" element={<ExamGazette />} />
+        <Route path="gazette" element={<ExamBatchGazette />} />
         <Route path="probation" element={<ExamProbation />} />
         <Route path="grievances" element={<ExamGrievances />} />
         <Route path="reports" element={<ExamReports />} />

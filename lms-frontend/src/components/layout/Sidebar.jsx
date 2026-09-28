@@ -164,8 +164,11 @@ const examMenu = [
   { label: "Absentee Verification", icon: "UserX", to: "/exam/absentees" },
   { label: "Incomplete Results", icon: "FileWarning", to: "/exam/incomplete" },
   { section: "RESULT AND MANAGEMENT" },
-  { label: "Results Compilation", icon: "Edit3", to: "/exam/results-compilation", badgeKey: "draftResults", badgeColor: "violet" },
-  { label: "Gazette Review", icon: "BookCheck", to: "/exam/gazette" },
+  { label: "Result Compilation", icon: "Layers", to: "/exam/result-compilation", badgeKey: "wfCompilation", badgeColor: "violet" },
+  { label: "Results Collection", icon: "ClipboardList", to: "/exam/results-collection", badgeKey: "wfCollection", badgeColor: "amber" },
+  { label: "Result Finalizing & Official", icon: "BadgeCheck", to: "/exam/result-finalizing", badgeKey: "wfFinalizing", badgeColor: "rose" },
+  { label: "Results Archive", icon: "Archive", to: "/exam/results-archive" },
+  { label: "Gazette", icon: "BookCheck", to: "/exam/gazette" },
   { label: "Probation Flagging", icon: "Flag", to: "/exam/probation" },
   { section: "MONITORING" },
   { label: "Mid Term Monitoring", icon: "FileEdit", to: "/exam/midterm" },
@@ -276,9 +279,12 @@ const Sidebar = ({ isOpen, onClose, collapsed, onToggleCollapse }) => {
     if (user?.role !== "exam_coordinator") return;
     let live = true;
     const fetchCounts = () => {
-      api.exam.counts()
-        .then((res) => { if (live) setCounts(res || {}); })
-        .catch(() => {});
+      Promise.all([api.exam.counts().catch(() => ({})), api.workflow.summary().catch(() => null)])
+        .then(([res, wf]) => {
+          if (!live) return;
+          const st = (wf && wf.stages) || {};
+          setCounts({ ...(res || {}), wfCompilation: st.compilation, wfCollection: st.collection, wfFinalizing: st.finalizing });
+        });
     };
     fetchCounts();
     const t = setInterval(fetchCounts, 60000); // refresh every minute

@@ -123,7 +123,7 @@ const ExamDashboard = () => {
               <p className="text-2xl font-bold text-app">{rk.batches || 0}</p>
             </div>
           </div>
-          <Link to="/exam/results-compilation" className="btn-primary text-sm w-full mt-3 inline-block text-center">Open Results Compilation</Link>
+          <Link to="/exam/result-compilation" className="btn-primary text-sm w-full mt-3 inline-block text-center">Open Result Compilation</Link>
         </div>
       </div>
     </div>
