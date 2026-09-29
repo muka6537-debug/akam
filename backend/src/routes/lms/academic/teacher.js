@@ -1908,6 +1908,7 @@ router.delete('/library/:id', asyncHandler(async (req, res) => {
 
 // ---------- LIVE CLASSES (across courses) ----------
 router.get('/live-classes', asyncHandler(async (req, res) => {
+  await require('../../../services/liveClassSync').topUp();
   const offerings = await myOfferings(req);
   const ids = offerings.map((o) => o.id);
   const offMap = {}; for (const o of offerings) offMap[o.id] = o;
@@ -1927,7 +1928,7 @@ router.get('/live-classes', asyncHandler(async (req, res) => {
         id: c.id, title: c.title, description: c.description,
         scheduledAt: c.scheduledAt, durationMin: c.durationMin,
         status: c.status, joinUrl: c.joinUrl, recordingUrl: c.recordingUrl,
-        offeringId: c.offeringId, bbbConfigured, canJoin,
+        offeringId: c.offeringId, bbbConfigured, canJoin, fromSchedule: c.scheduleSlotId != null,
         courseCode: o && o.course ? o.course.code : '',
         courseTitle: o && o.course ? o.course.title : '',
       };

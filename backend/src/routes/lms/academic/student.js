@@ -1926,6 +1926,8 @@ router.get('/schedule', asyncHandler(async (req, res) => {
 // ============================================================
 router.get('/live-classes', asyncHandler(async (req, res) => {
   const studentId = req.lmsUser.id;
+  // B3.a — keep the Weekly-Schedule-driven live classes horizon filled.
+  await require('../../../services/liveClassSync').topUp();
   const offeringIds = await myOfferingIds(studentId, ['ENROLLED']);
   const items = await prisma.liveClass.findMany({
     where: { offeringId: { in: offeringIds }, isDeleted: false },
@@ -1951,6 +1953,8 @@ router.get('/live-classes', asyncHandler(async (req, res) => {
         canJoin,
         courseCode: lc.offering.course.code,
         courseTitle: lc.offering.course.title,
+        offeringId: lc.offeringId,
+        fromSchedule: lc.scheduleSlotId != null,
         teacher: lc.offering.teacher && lc.offering.teacher.profile ? lc.offering.teacher.profile.fullName : 'TBA',
       };
     }),

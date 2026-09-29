@@ -2150,6 +2150,16 @@ async function ensureLabSlot(termId, offeringId, { roomHint } = {}) {
   return null;
 }
 
+// B3.a — Weekly Schedule drives Live Classes automatically.
+const liveClassSync = require('../../../services/liveClassSync');
+async function syncLive(slotIds) {
+  const out = { created: 0, updated: 0, removed: 0 };
+  for (const id of slotIds.filter(Boolean)) {
+    try { const r = await liveClassSync.syncSlot(id); out.created += r.created; out.updated += r.updated; out.removed += r.removed; } catch (_) { /* never block scheduling */ }
+  }
+  return out;
+}
+
 /* GET full weekly timetable for the current (or given) term. */
 router.get('/schedule', COORD_OR_GOV, asyncHandler(async (req, res) => {
   const term = await currentTerm();
@@ -2226,7 +2236,8 @@ router.post('/schedule', COORD, validate([
   // offering => same instructor). Idempotent — skips if a LAB slot exists.
   const labSlot = await ensureLabSlot(termId, offeringId);
   if (labSlot) await audit(req, 'SCHEDULE_LAB_AUTO_CREATE', 'ScheduleSlot', labSlot.id, { after: labSlot });
-  res.status(201).json({ slot, labSlot: labSlot || null, clashes });
+  const liveClasses = await syncLive([slot.id, labSlot && labSlot.id]);
+  res.status(201).json({ slot, labSlot: labSlot || null, clashes, liveClasses });
 }));
 
 /* Edit / move a slot (drag&drop). Re-checks clashes (excluding itself). */
@@ -2256,7 +2267,8 @@ router.put('/schedule/:id', COORD, asyncHandler(async (req, res) => {
   // Req 2: guarantee a Lab slot still exists for lab courses (in case none yet).
   const labSlot = await ensureLabSlot(termId, before.offeringId);
   if (labSlot) await audit(req, 'SCHEDULE_LAB_AUTO_CREATE', 'ScheduleSlot', labSlot.id, { after: labSlot });
-  res.json({ slot, labSlot: labSlot || null, clashes });
+  const liveClasses = await syncLive([id, labSlot && labSlot.id]);
+  res.json({ slot, labSlot: labSlot || null, clashes, liveClasses });
 }));
 
 /* Delete a slot. */
@@ -2276,7 +2288,9 @@ router.delete('/schedule/:id', COORD, asyncHandler(async (req, res) => {
     });
   }
   await audit(req, 'SCHEDULE_SLOT_DELETE', 'ScheduleSlot', id, { before });
-  res.json({ message: 'Schedule slot deleted' });
+  const labIds = (await prisma.scheduleSlot.findMany({ where: { offeringId: before.offeringId, slotType: 'LAB' }, select: { id: true } })).map((x) => x.id);
+  const liveClasses = await syncLive([id, ...labIds]);
+  res.json({ message: 'Schedule slot deleted', liveClasses });
 }));
 
 /* Auto timetable generator: assigns clash-free weekly slots to every
@@ -2338,6 +2352,7 @@ router.post('/schedule/auto-generate', COORD, asyncHandler(async (req, res) => {
     }
   }
   await audit(req, 'SCHEDULE_AUTO_GENERATE', 'AcademicTerm', termId, { after: { created, labCreated, clearExisting } });
+  try { await liveClassSync.syncOfferings(offerings.map((o) => o.id)); } catch (_) { /* non-fatal */ }
   res.json({ message: `Auto-generated ${created} class slot(s)${labCreated ? ` (${labCreated} lab)` : ''}`, created, labCreated });
 }));
 

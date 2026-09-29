@@ -344,6 +344,14 @@ app.use((err, req, res, next) => {
   }
 })();
 
+// B3.a — mirror the Weekly Schedule into Live Classes at boot (idempotent).
+(async () => {
+  try {
+    const out = await require('./services/liveClassSync').syncOfferings();
+    console.log(`[startup-live-class-sync] created ${out.created}, updated ${out.updated}, removed ${out.removed}.`);
+  } catch (e) { console.warn('[startup-live-class-sync] Skipped:', e.message); }
+})();
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`AUST ODL Backend running on port ${PORT}`);
 });
