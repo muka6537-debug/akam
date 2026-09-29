@@ -3392,32 +3392,45 @@ router.get('/scheme', asyncHandler(async (req, res) => {
     orderBy: { number: 'asc' },
   });
 
-  // Student's results by course code for progress
+  // B1.b — status reflects the student's ACTUAL progress:
+  //   COMPLETED   course passed through a declared (unofficial/official) result,
+  //               or its registration is COMPLETED (earlier semesters)
+  //   IN_PROGRESS registered in the CURRENT term and not yet completed
+  //   PENDING     (shown as "Upcoming") — future semesters, never In Progress
+  const term = await prisma.academicTerm.findFirst({ where: { isCurrent: true, isActive: true } });
   const results = await prisma.courseResult.findMany({
-    where: { studentId, status: 'PUBLISHED' },
+    where: { studentId, workflowStage: { in: ['UNOFFICIAL', 'OFFICIAL'] } },
     include: { offering: { include: { course: true } } },
   });
   const passedByCode = {};
   for (const r of results) passedByCode[r.offering.course.code] = { grade: r.letterGrade, percent: r.totalPercent };
-  // Currently registered courses
   const regs = await prisma.courseRegistration.findMany({
-    where: { studentId, status: 'ENROLLED' },
+    where: { studentId, status: { in: ['ENROLLED', 'COMPLETED'] } },
     include: { offering: { include: { course: true } } },
   });
-  const inProgress = new Set(regs.map((r) => r.offering.course.code));
+  const completedReg = new Set(regs.filter((r) => r.status === 'COMPLETED').map((r) => r.offering.course.code));
+  const inProgress = new Set(regs.filter((r) => r.status === 'ENROLLED' && (!term || r.offering.termId === term.id)).map((r) => r.offering.course.code));
+  const courseStatus = (code) => (passedByCode[code] || completedReg.has(code) ? 'COMPLETED' : inProgress.has(code) ? 'IN_PROGRESS' : 'PENDING');
 
   res.json({
     program: { id: program.id, code: program.code, name: program.name, shortForm: program.shortForm, totalSemesters: program.totalSemesters },
     semesters: semesters.map((s) => ({
       number: s.number,
       title: s.title,
+      // Semester-level status derived from its courses.
+      status: (() => {
+        const st = s.courses.map((c) => courseStatus(c.code));
+        if (st.length && st.every((x) => x === 'COMPLETED')) return 'COMPLETED';
+        if (st.some((x) => x === 'IN_PROGRESS')) return 'IN_PROGRESS';
+        return 'PENDING';
+      })(),
       courses: s.courses.map((c) => ({
         code: c.code, title: c.title, creditHours: c.creditHours,
         hasLab: c.hasLab === true,
         theoryCredit: c.theoryCredit != null ? c.theoryCredit : c.creditHours,
         labCredit: c.labCredit != null ? c.labCredit : 0,
         creditLabel: creditLabel(c),
-        status: passedByCode[c.code] ? 'COMPLETED' : (inProgress.has(c.code) ? 'IN_PROGRESS' : 'PENDING'),
+        status: courseStatus(c.code),
         grade: passedByCode[c.code] ? passedByCode[c.code].grade : null,
       })),
     })),

@@ -79,7 +79,10 @@ const StudyScheme = () => {
                 <motion.div key={sem.number || i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
                   <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <h3 className="font-display font-bold text-slate-900 dark:text-slate-100">{sem.title || `Semester ${sem.number}`}</h3>
-                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{semCredits} CH</span>
+                    <span className="flex items-center gap-2">
+                      {sem.status && <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${statusStyle(sem.status).chip}`}>{statusStyle(sem.status).label}</span>}
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">{semCredits} CH</span>
+                    </span>
                   </div>
                   <div className="divide-y divide-slate-100 dark:divide-slate-800">
                     {(sem.courses || []).map((c, j) => {
