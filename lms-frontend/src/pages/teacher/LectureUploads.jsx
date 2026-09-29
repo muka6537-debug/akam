@@ -11,6 +11,7 @@ import { Skeleton } from "../../components/common/Skeleton";
 import ErrorState from "../../components/common/ErrorState";
 import EmptyState from "../../components/common/EmptyState";
 import useApi from "../../hooks/useApi";
+import { youtubeId, youtubeEmbedUrl, youtubeThumb, isShort } from "../../utils/youtube";
 import api, { fileUrl } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
 
@@ -20,10 +21,8 @@ import { useToast } from "../../context/ToastContext";
  * Lectures can be a YouTube/external URL or an uploaded video file.
  * ======================================================================= */
 
-const ytId = (url = "") => {
-  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([\w-]{11})/);
-  return m ? m[1] : null;
-};
+// B2.a — shared parser: watch / youtu.be / shorts / embed / live / nocookie.
+const ytId = (url = "") => youtubeId(url);
 const isHttp = (u = "") => /^https?:\/\//i.test(u);
 // Resolve a playable source. IMPORTANT: prefer `filePath` (the actual
 // served path under /uploads/...) over `fileName` (the original upload
@@ -352,7 +351,7 @@ const TeacherLectureUploads = () => {
                                           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
                                             {w.lectures.map((l) => {
                                               const vid = ytId(l.url || "");
-                                              const thumb = vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null;
+                                              const thumb = vid ? youtubeThumb(l.url) : null;
                                               return (
                                                 <div key={l.id} className="card-base overflow-hidden group hover:shadow-lg transition-all">
                                                   <div className="relative aspect-video bg-slate-900 cursor-pointer" onClick={() => setPreview({ ...l, courseCode: s.courseCode, courseTitle: s.courseTitle })}>
@@ -502,9 +501,9 @@ const TeacherLectureUploads = () => {
           const src = resolveSrc(preview);
           return (
             <div>
-              <div className="aspect-video rounded-xl overflow-hidden bg-black">
+              <div className={`${vid && isShort(preview.url) ? "mx-auto" : "aspect-video"} rounded-xl overflow-hidden bg-black`} style={vid && isShort(preview.url) ? { aspectRatio: "9 / 16", height: "min(70vh, 640px)" } : undefined}>
                 {vid ? (
-                  <iframe src={`https://www.youtube.com/embed/${vid}`} title={preview.title} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                  <iframe src={youtubeEmbedUrl(preview.url)} title={preview.title} className="w-full h-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />
                 ) : src ? (
                   // Native HTML5 player: controls give seeking + full-screen;
                   // preload metadata enables the seek bar; multiple <source>

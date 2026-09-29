@@ -6,16 +6,15 @@ import { Skeleton } from "../../components/common/Skeleton";
 import ErrorState from "../../components/common/ErrorState";
 import EmptyState from "../../components/common/EmptyState";
 import useApi from "../../hooks/useApi";
+import { youtubeId, youtubeEmbedUrl, youtubeThumb, isShort } from "../../utils/youtube";
 import api from "../../services/api";
 import { fileUrl } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
 
 // Extract a YouTube video id from any common URL form
 // (watch?v=, youtu.be/, /embed/, /v/).
-const ytId = (url = "") => {
-  const m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|v\/)|youtu\.be\/)([\w-]{11})/);
-  return m ? m[1] : null;
-};
+// B2.a — shared parser: watch / youtu.be / shorts / embed / live / nocookie.
+const ytId = (url = "") => youtubeId(url);
 
 const resolveUrl = (lec) => {
   // Prefer the served path (filePath) over the original upload name (fileName).
@@ -157,7 +156,7 @@ const RecordedLectures = () => {
                   {s.lectures.map((lec, li) => {
                     const url = resolveUrl(lec);
                     const vid = ytId(lec.url || "");
-                    const thumb = vid ? `https://img.youtube.com/vi/${vid}/hqdefault.jpg` : null;
+                    const thumb = vid ? youtubeThumb(lec.url) : null;
                     // Anything that is a YouTube link, a VIDEO/RECORDING, or a
                     // known video file extension is playable in the modal.
                     const isVideo = !!vid
@@ -222,14 +221,18 @@ const RecordedLectures = () => {
               </div>
               {vid ? (
                 // YouTube embed — supports full-screen, seeking, captions natively.
-                <div className="w-full bg-black" style={{ aspectRatio: "16 / 9" }}>
-                  <iframe
-                    src={`https://www.youtube.com/embed/${vid}?autoplay=1&rel=0`}
-                    title={active.title}
-                    className="w-full h-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  />
+                <div className="w-full bg-black flex justify-center">
+                  {/* Shorts are vertical (9:16); long-form videos are 16:9. */}
+                  <div style={isShort(active.url) ? { aspectRatio: "9 / 16", height: "min(78vh, 720px)" } : { aspectRatio: "16 / 9", width: "100%" }}>
+                    <iframe
+                      src={youtubeEmbedUrl(active.url, { autoplay: true })}
+                      title={active.title}
+                      className="w-full h-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      allowFullScreen
+                    />
+                  </div>
                 </div>
               ) : (
                 <video
