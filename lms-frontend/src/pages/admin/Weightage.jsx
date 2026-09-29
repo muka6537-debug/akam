@@ -192,7 +192,7 @@ const Weightage = () => {
       quizWeight: w.quizWeight ?? 15,
       assignmentWeight: w.assignmentWeight ?? 20,
       labTaskWeight: course.hasLab ? (w.labTaskWeight ?? 0) : 0,
-      semesterProjectWeight: course.hasLab ? (w.semesterProjectWeight ?? 0) : 0,
+      semesterProjectWeight: w.semesterProjectWeight ?? 0,
       quizCount: w.quizCount ?? (w.quizItems?.length || 0),
       assignmentCount: w.assignmentCount ?? (w.assignmentItems?.length || 0),
       labTaskCount: course.hasLab ? (w.labTaskCount ?? (w.labTaskItems?.length || 0)) : 0,
@@ -247,7 +247,7 @@ const Weightage = () => {
       Number(form.quizWeight || 0) +
       Number(form.assignmentWeight || 0) +
       (editing?.hasLab ? Number(form.labTaskWeight || 0) : 0) +
-      (editing?.hasLab ? Number(form.semesterProjectWeight || 0) : 0);
+      Number(form.semesterProjectWeight || 0);
     return Math.round(t * 100) / 100;
   }, [form, editing]);
 
@@ -261,7 +261,7 @@ const Weightage = () => {
         quizWeight: Number(form.quizWeight) || 0,
         assignmentWeight: Number(form.assignmentWeight) || 0,
         labTaskWeight: editing.hasLab ? Number(form.labTaskWeight) || 0 : 0,
-        semesterProjectWeight: editing.hasLab ? Number(form.semesterProjectWeight) || 0 : 0,
+        semesterProjectWeight: Number(form.semesterProjectWeight) || 0,
         quizCount: Math.trunc(Number(form.quizCount) || 0),
         assignmentCount: Math.trunc(Number(form.assignmentCount) || 0),
         labTaskCount: editing.hasLab ? Math.trunc(Number(form.labTaskCount) || 0) : 0,
@@ -363,8 +363,8 @@ const Weightage = () => {
                     {c.hasLab && (
                       <span className="px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300 font-semibold">Lab Task {w.labTaskWeight ?? 0}% ×{w.labTaskCount ?? 0}</span>
                     )}
-                    {c.hasLab && (
-                      <span className="px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 font-semibold">Semester Project {w.semesterProjectWeight ?? 0}%</span>
+                    {Number(w.semesterProjectWeight) > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300 font-semibold">Project {w.semesterProjectWeight}%</span>
                     )}
                   </div>
                 </div>
@@ -407,24 +407,29 @@ const Weightage = () => {
                     <FlaskConical size={13} /> Lab Tasks (lab course)
                   </div>
                   <CountField label="Lab Tasks" kind="labTask" icon={FlaskConical} form={form} setCount={setCount} setCategoryWeight={setCategoryWeight} setItem={setItem} />
-                  {/* Semester Project (lab) — coordinator-adjustable (Req 1.3) */}
-                  <div className="mt-3 pt-3 border-t border-violet-200 dark:border-violet-800">
-                    <label className="text-xs font-semibold text-secondary-app flex items-center gap-1">
-                      <FlaskConical size={12} /> Semester Project (lab) %
-                    </label>
-                    <div className="relative w-full mt-1">
-                      <input
-                        type="number" min="0" step="0.5"
-                        value={form.semesterProjectWeight}
-                        onChange={(e) => change("semesterProjectWeight", e.target.value)}
-                        className="input-base w-full text-sm py-1.5 pr-6"
-                      />
-                      <Percent size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
-                    </div>
-                    <p className="text-[10px] text-muted-app mt-1">Weightage of the course's lab semester project, adjustable here.</p>
-                  </div>
                 </div>
               )}
+              {/* Project (A1) — optional for ANY subject. 0% = this subject has no Project,
+                  and the Project section is hidden for teachers and students. */}
+              <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50/50 dark:bg-cyan-950/20 p-3">
+                <label className="text-xs font-semibold text-secondary-app flex items-center gap-1">
+                  <ListChecks size={12} /> Project %
+                </label>
+                <div className="relative w-full mt-1">
+                  <input
+                    type="number" min="0" step="0.5"
+                    value={form.semesterProjectWeight}
+                    onChange={(e) => change("semesterProjectWeight", e.target.value)}
+                    className="input-base w-full text-sm py-1.5 pr-6"
+                  />
+                  <Percent size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                </div>
+                <p className="text-[10px] text-muted-app mt-1">Set 0 if this subject has no Project — the Project section will not appear anywhere for it.</p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-900 p-3 text-[11px] text-muted-app">
+              <b>Hard limits for teachers:</b> the counts above are the maximum number of Assignments / Quizzes / Lab Tasks a teacher can create for this subject (Project: one). Categories set to 0% or 0 items do not appear in the teacher gradebook or the student view.
             </div>
 
             {/* Total indicator */}
