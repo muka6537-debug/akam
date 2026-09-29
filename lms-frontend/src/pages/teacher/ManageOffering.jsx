@@ -368,7 +368,7 @@ function AttendanceTab({ offeringId }) {
 }
 
 /* ---------------- Assignments ---------------- */
-const EMPTY_ASSIGNMENT = { title: "", description: "", totalMarks: 100, dueDate: "", startTime: "", endTime: "", allowLate: true };
+const EMPTY_ASSIGNMENT = { title: "", description: "", totalMarks: 100, dueDate: "", startTime: "", endTime: "", allowLate: true, kind: "ASSIGNMENT" };
 function AssignmentsTab({ offeringId }) {
   const { toast } = useToast();
   const { data, loading, error, reload } = useApi(() => api.teacher.assignments(offeringId), [offeringId]);
@@ -448,7 +448,7 @@ function AssignmentsTab({ offeringId }) {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-bold text-app">{a.title} {a.isPublished ? <Badge color="emerald" size="sm">Published</Badge> : <Badge color="slate" size="sm">Draft</Badge>}</p>
-                  <p className="text-xs text-muted-app">Due {fmtDate(a.dueDate)}{a.startTime ? ` · ${a.startTime}` : ""}{a.endTime ? `–${a.endTime}` : ""} · {a.totalMarks} marks</p>
+                  <p className="text-xs text-muted-app">Due {fmtDate(a.dueDate)}{a.startTime ? ` · ${a.startTime}` : ""}{a.endTime ? `–${a.endTime}` : ""} · {a.totalMarks} marks{a.kind === "PROJECT" ? " · Project" : ""}</p>
                 </div>
                 <button onClick={() => del(a.id)} className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"><Trash2 size={14} /></button>
               </div>
@@ -474,7 +474,14 @@ function AssignmentsTab({ offeringId }) {
           <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Title" className="input-base w-full" />
           <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Instructions" rows={3} className="input-base w-full" />
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="text-xs text-muted-app">Total Marks</label><input type="number" value={form.totalMarks} onChange={(e) => setForm({ ...form, totalMarks: e.target.value })} className="input-base w-full mt-1" /></div>
+            <div><label className="text-xs text-muted-app">Type</label>
+              <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} className="input-base w-full mt-1">
+                <option value="ASSIGNMENT">Assignment</option>
+                <option value="PROJECT">Project</option>
+              </select>
+              <p className="text-[10px] text-muted-app mt-1">Only the number of items allowed by the Course Coordinator can be created.</p>
+            </div>
+            <div><label className="text-xs text-muted-app">Total Marks (any value — auto-converted to the weightage)</label><input type="number" value={form.totalMarks} onChange={(e) => setForm({ ...form, totalMarks: e.target.value })} className="input-base w-full mt-1" /></div>
             <div><label className="text-xs text-muted-app">Due Date</label><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="input-base w-full mt-1" /></div>
             <div><label className="text-xs text-muted-app">Start Time</label><input type="time" value={form.startTime} onChange={(e) => setForm({ ...form, startTime: e.target.value })} className="input-base w-full mt-1" /></div>
             <div><label className="text-xs text-muted-app">End Time</label><input type="time" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} className="input-base w-full mt-1" /></div>
