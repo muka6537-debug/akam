@@ -39,10 +39,18 @@ const statusMeta = (s) => {
   return { chip: "bg-slate-100 text-slate-600", label: s || "—", dot: "bg-slate-400" };
 };
 
-const fmtDateTime = (d) => {
-  if (!d) return "";
-  try { return new Date(d).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); } catch { return d; }
-};
+
+// Distinct, colour-blind-friendly accents per course (B1.c).
+const COURSE_PALETTE = [
+  { bar: "bg-blue-500", soft: "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300", chip: "bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-200" },
+  { bar: "bg-emerald-500", soft: "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300", chip: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200" },
+  { bar: "bg-amber-500", soft: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300", chip: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200" },
+  { bar: "bg-violet-500", soft: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300", chip: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200" },
+  { bar: "bg-rose-500", soft: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300", chip: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200" },
+  { bar: "bg-cyan-500", soft: "bg-cyan-50 text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300", chip: "bg-cyan-100 text-cyan-800 dark:bg-cyan-500/20 dark:text-cyan-200" },
+  { bar: "bg-orange-500", soft: "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300", chip: "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200" },
+  { bar: "bg-teal-500", soft: "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300", chip: "bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-200" },
+];
 
 const resolveRecording = (lc) => {
   if (!lc.recordingUrl) return null;
@@ -114,12 +122,46 @@ const LiveClasses = () => {
     }
   }, [classes, searchParams, autoJoined, room]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // B1.c — each course gets its own stable accent so classes of different
+  // courses are never visually confused.
+  const courses = useMemo(() => {
+    const m = new Map();
+    classes.forEach((c) => { if (c.courseCode && !m.has(c.courseCode)) m.set(c.courseCode, { code: c.courseCode, title: c.courseTitle, teacher: c.teacher }); });
+    return [...m.values()].sort((a, b) => a.code.localeCompare(b.code)).map((c, i) => ({ ...c, color: COURSE_PALETTE[i % COURSE_PALETTE.length] }));
+  }, [classes]);
+  const colorOf = (code) => (courses.find((c) => c.code === code) || { color: COURSE_PALETTE[0] }).color;
+  const [courseFilter, setCourseFilter] = useState("ALL");
+
   const shown = useMemo(() => {
-    if (filter === "ALL") return classes;
-    if (filter === "UPCOMING") return classes.filter((c) => ["SCHEDULED", "UPCOMING", "LIVE"].includes((c.status || "").toUpperCase()));
-    if (filter === "RECORDED") return classes.filter((c) => ["ENDED", "COMPLETED"].includes((c.status || "").toUpperCase()));
-    return classes;
-  }, [classes, filter]);
+    let list = classes;
+    if (courseFilter !== "ALL") list = list.filter((c) => c.courseCode === courseFilter);
+    const st = (c) => (c.status || "").toUpperCase();
+    if (filter === "UPCOMING") list = list.filter((c) => ["SCHEDULED", "UPCOMING", "LIVE"].includes(st(c)));
+    if (filter === "RECORDED") list = list.filter((c) => ["ENDED", "COMPLETED"].includes(st(c)));
+    return list;
+  }, [classes, filter, courseFilter]);
+
+  // Split into Live now / Today / Upcoming / Past for an at-a-glance agenda.
+  const sections = useMemo(() => {
+    const now = new Date();
+    const today = now.toDateString();
+    const st = (c) => (c.status || "").toUpperCase();
+    const live = [], todays = [], upcoming = [], past = [];
+    shown.forEach((c) => {
+      const d = new Date(c.scheduledAt);
+      if (st(c) === "LIVE") live.push(c);
+      else if (["ENDED", "COMPLETED", "CANCELLED"].includes(st(c)) || d.getTime() + (c.durationMin || 60) * 60000 < now.getTime()) past.push(c);
+      else if (d.toDateString() === today) todays.push(c);
+      else upcoming.push(c);
+    });
+    const asc = (a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt);
+    return [
+      { key: "live", title: "Live now", items: live.sort(asc) },
+      { key: "today", title: "Today", items: todays.sort(asc) },
+      { key: "upcoming", title: "Upcoming", items: upcoming.sort(asc) },
+      { key: "past", title: "Past sessions", items: past.sort((a, b) => -asc(a, b)) },
+    ].filter((sct) => sct.items.length);
+  }, [shown]);
 
   if (loading) {
     return (
@@ -130,64 +172,92 @@ const LiveClasses = () => {
     );
   }
 
+  const renderCard = (lc) => {
+    const sm = statusMeta(lc.status);
+    const recording = resolveRecording(lc);
+    const isLive = (lc.status || "").toUpperCase() === "LIVE";
+    const ended = ["ENDED", "COMPLETED"].includes((lc.status || "").toUpperCase());
+    const col = colorOf(lc.courseCode);
+    const d = new Date(lc.scheduledAt);
+    const end = new Date(d.getTime() + (lc.durationMin || 60) * 60000);
+    const hm = (x) => x.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    return (
+      <motion.div key={lc.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        className={`relative bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden flex ${isLive ? "ring-2 ring-rose-400" : ""}`}>
+        <div className={`w-1.5 shrink-0 ${col.bar}`} />
+        <div className="flex-1 p-4 flex flex-col md:flex-row md:items-center gap-4 min-w-0">
+          <div className={`w-16 shrink-0 rounded-xl text-center py-2 ${col.soft}`}>
+            <p className="text-[10px] font-bold uppercase">{d.toLocaleDateString("en-GB", { weekday: "short" })}</p>
+            <p className="text-xl font-extrabold leading-tight">{d.getDate()}</p>
+            <p className="text-[10px] font-semibold">{d.toLocaleDateString("en-GB", { month: "short" })}</p>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-md ${col.chip}`}>{lc.courseCode}</span>
+              <span className="font-display font-bold text-slate-900 dark:text-slate-100 truncate">{lc.courseTitle}</span>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.chip}`}>{sm.label}</span>
+              {lc.fromSchedule && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">Weekly schedule</span>}
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mt-1 truncate">{lc.title}</p>
+            <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 flex-wrap">
+              <span className="flex items-center gap-1"><Clock size={11} /> {hm(d)} – {hm(end)} ({lc.durationMin} min)</span>
+              {lc.teacher && <span className="flex items-center gap-1"><User size={11} /> {lc.teacher}</span>}
+              {lc.description && <span className="flex items-center gap-1 truncate"><Calendar size={11} /> {lc.description}</span>}
+            </div>
+          </div>
+          <div className="shrink-0">
+            {isLive && lc.joinUrl ? (
+              <button onClick={() => joinClass(lc)} disabled={joining === lc.id} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60">{joining === lc.id ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />} Join Live</button>
+            ) : ended && recording ? (
+              <a href={recording} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-primary-600 text-white hover:bg-primary-700"><Play size={15} /> Watch Recording</a>
+            ) : !ended && lc.joinUrl ? (
+              <button onClick={() => joinClass(lc)} disabled={joining === lc.id} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60">{joining === lc.id ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />} Join Classroom</button>
+            ) : !ended ? (
+              <span className="text-xs font-semibold text-slate-500 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 inline-flex items-center gap-1"><Clock size={13} /> Opens when the teacher starts</span>
+            ) : (
+              <span className="text-xs text-slate-400">No recording</span>
+            )}
+          </div>
+        </div>
+      </motion.div>
+    );
+  };
+
   return (
     <div>
-      <PageHeader title="Live Classes" subtitle="Join live sessions and watch recordings" icon="Radio" breadcrumb={["Dashboard", "Live Classes"]} />
+      <PageHeader title="Live Classes" subtitle="Your live sessions, organised by course — times follow the Weekly Schedule" icon="Radio" breadcrumb={["Dashboard", "Live Classes"]}
+        actions={<button onClick={reload} className="btn-secondary text-sm">Refresh</button>} />
 
       {error ? (
         <ErrorState description={error} onRetry={reload} />
       ) : classes.length === 0 ? (
-        <EmptyState icon="Radio" title="No live classes" description="Live class sessions scheduled by your instructors will appear here." />
+        <EmptyState icon="Radio" title="No live classes" description="Live classes appear here automatically once your course's weekly schedule is set." />
       ) : (
         <>
+          {/* Course legend / filter — each course has its own colour */}
+          <div className="flex gap-2 mb-3 overflow-x-auto no-scrollbar">
+            <button onClick={() => setCourseFilter("ALL")} className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border ${courseFilter === "ALL" ? "bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"}`}>All courses</button>
+            {courses.map((c) => (
+              <button key={c.code} onClick={() => setCourseFilter(c.code)} title={c.title}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap border flex items-center gap-1.5 ${courseFilter === c.code ? `${c.color.chip} border-transparent` : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"}`}>
+                <span className={`w-2 h-2 rounded-full ${c.color.bar}`} /> {c.code} · {c.title}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2 mb-5">
             {[["ALL", "All"], ["UPCOMING", "Upcoming & Live"], ["RECORDED", "Recorded"]].map(([k, l]) => (
               <button key={k} onClick={() => setFilter(k)} className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold ${filter === k ? "bg-primary-600 text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300"}`}>{l}</button>
             ))}
           </div>
 
-          {shown.length === 0 ? (
+          {!sections.length ? (
             <EmptyState icon="Radio" title="Nothing here" description="No classes match this filter." />
-          ) : (
-            <div className="space-y-3">
-              {shown.map((lc, i) => {
-                const sm = statusMeta(lc.status);
-                const recording = resolveRecording(lc);
-                const isLive = (lc.status || "").toUpperCase() === "LIVE";
-                const ended = ["ENDED", "COMPLETED"].includes((lc.status || "").toUpperCase());
-                const canJoin = !ended && (lc.canJoin || lc.bbbConfigured || !!lc.joinUrl);
-                return (
-                  <motion.div key={lc.id || i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-4 flex flex-col md:flex-row md:items-center gap-4">
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-rose-500 to-pink-600 text-white shrink-0"><Video size={22} /></div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${sm.chip}`}>{sm.label}</span>
-                        {lc.courseCode && <span className="text-[10px] font-mono font-bold text-primary-600">{lc.courseCode}</span>}
-                      </div>
-                      <p className="font-display font-bold text-slate-900 dark:text-slate-100 mt-1">{lc.title}</p>
-                      {lc.description && <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">{lc.description}</p>}
-                      <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 flex-wrap">
-                        <span className="flex items-center gap-1"><Calendar size={11} /> {fmtDateTime(lc.scheduledAt)}</span>
-                        {lc.durationMin && <span className="flex items-center gap-1"><Clock size={11} /> {lc.durationMin} min</span>}
-                        {lc.teacher && <span className="flex items-center gap-1"><User size={11} /> {lc.teacher}</span>}
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      {isLive && lc.joinUrl ? (
-                        <button onClick={() => joinClass(lc)} disabled={joining === lc.id} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60">{joining === lc.id ? <Loader2 size={15} className="animate-spin" /> : <Radio size={15} />} Join Live</button>
-                      ) : ended && recording ? (
-                        <a href={recording} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-primary-600 text-white hover:bg-primary-700"><Play size={15} /> Watch Recording</a>
-                      ) : !ended && lc.joinUrl ? (
-                        <button onClick={() => joinClass(lc)} disabled={joining === lc.id} className="inline-flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60">{joining === lc.id ? <Loader2 size={15} className="animate-spin" /> : <ExternalLink size={15} />} Join Classroom</button>
-                      ) : (
-                        <span className="text-xs text-slate-400">No link</span>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })}
+          ) : sections.map((sct) => (
+            <div key={sct.key} className="mb-6">
+              <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${sct.key === "live" ? "text-rose-600" : "text-muted-app"}`}>{sct.title} · {sct.items.length}</p>
+              <div className="space-y-2.5">{sct.items.map(renderCard)}</div>
             </div>
-          )}
+          ))}
         </>
       )}
 
