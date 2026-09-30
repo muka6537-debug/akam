@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Search, Filter, Grid3x3, List, BookOpen, FlaskConical } from "lucide-react";
+import { Search, Grid3x3, List, BookOpen, FlaskConical } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "../../components/common/PageHeader";
@@ -84,16 +84,10 @@ const Courses = () => {
     );
   }, [courses, search]);
 
-  // Render list: every course card, plus a SEPARATE distinct lab card for
-  // every course that has a lab component (Req 3.1).
-  const cards = useMemo(() => {
-    const list = [];
-    for (const c of filtered) {
-      list.push({ ...c, kind: "course", key: `course-${c.registrationId}` });
-      if (c.hasLab) list.push({ ...c, kind: "lab", key: `lab-${c.registrationId}` });
-    }
-    return list;
-  }, [filtered]);
+  // B1.d — ONE unified card per course. Courses with a Lab component are no
+  // longer split into a Theory card + Lab card; the single card opens the
+  // course page where Theory and Lab appear as two separate sections.
+  const cards = useMemo(() => filtered.map((c) => ({ ...c, kind: "course", key: `course-${c.registrationId}` })), [filtered]);
 
   const openCourse = (offeringId) => navigate(`/student/courses/${offeringId}`);
 
@@ -201,7 +195,12 @@ const Courses = () => {
               <div className={`relative h-32 bg-gradient-to-br ${c.gradient} p-5 text-white`}>
                 <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-xl" />
                 <div className="absolute -right-2 -bottom-6 w-32 h-32 bg-white/5 rounded-full blur-2xl" />
-                <BookOpen size={32} className="mb-3" />
+                <div className="flex items-start justify-between">
+                  <BookOpen size={32} className="mb-3" />
+                  {c.hasLab && (
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-white/25 px-2 py-0.5 rounded-full inline-flex items-center gap-1"><FlaskConical size={11} /> Theory + Lab</span>
+                  )}
+                </div>
                 <p className="text-xs opacity-90 font-mono">{c.code}</p>
                 <p className="font-display font-bold text-lg leading-tight">{c.title}</p>
               </div>
@@ -271,7 +270,7 @@ const Courses = () => {
               {cards.map((c) => (
                 <tr key={c.key} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900">
                   <td className="px-4 py-3 font-mono font-bold text-primary-700">{c.code}{c.kind === "lab" ? " · LAB" : ""}</td>
-                  <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">{c.kind === "lab" ? <span className="inline-flex items-center gap-1"><FlaskConical size={13} className="text-indigo-600" />{c.title} — Lab</span> : c.title}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900 dark:text-slate-100">{c.title}{c.hasLab && <span className="ml-2 text-[10px] font-bold text-indigo-600 inline-flex items-center gap-0.5"><FlaskConical size={11} /> THEORY + LAB</span>}</td>
                   <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{c.instructor}</td>
                   <td className="px-4 py-3">{c.credits}</td>
                   <td className="px-4 py-3">

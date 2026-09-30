@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, FileText, Megaphone, CalendarCheck, Download } from "lucide-react";
+import { ArrowLeft, FileText, Megaphone, CalendarCheck, Download, BookOpen, FlaskConical, ChevronRight } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
 import Badge from "../../components/common/Badge";
 import { Skeleton } from "../../components/common/Skeleton";
@@ -30,6 +31,16 @@ const CourseDetail = () => {
   const att = data?.attendance;
   const materials = data?.materials || [];
   const announcements = data?.announcements || [];
+  // B1.d — Theory and Lab are two separate sections of ONE course.
+  const hasLab = !!course?.hasLab;
+  const [section, setSection] = useState("theory");
+  const labApi = useApi(() => (hasLab ? api.student.labTasks() : Promise.resolve({ courses: [] })), [hasLab, offeringId]);
+  const gb = useApi(() => api.student.courseGradebook(offeringId), [offeringId]);
+  const labCourse = (labApi.data?.courses || []).find((c) => String(c.offeringId) === String(offeringId));
+  const labTasks = labCourse?.labTasks || [];
+  const cats = gb.data?.breakdown?.categories || [];
+  const theoryCats = cats.filter((c) => c.key !== "lab");
+  const labCat = cats.find((c) => c.key === "lab");
 
   return (
     <div>
@@ -75,6 +86,49 @@ const CourseDetail = () => {
             </div>
           )}
 
+          {hasLab && (
+            <div className="flex gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 w-fit" role="tablist">
+              {[["theory", "Theory", BookOpen, `${course.theoryCredit ?? course.creditHours - (course.labCredit || 0)} Cr`], ["lab", "Lab", FlaskConical, `${course.labCredit ?? 1} Cr`]].map(([k, l, Icon, cr]) => (
+                <button key={k} role="tab" aria-selected={section === k} onClick={() => setSection(k)}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5 ${section === k ? (k === "lab" ? "bg-indigo-600 text-white shadow" : "bg-primary-600 text-white shadow") : "text-slate-600 dark:text-slate-300"}`}>
+                  <Icon size={15} /> {l} <span className="text-[10px] opacity-80">{cr}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {hasLab && section === "lab" ? (
+            <div className="space-y-6">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-indigo-100 dark:border-indigo-900 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-bold text-app flex items-center gap-2"><FlaskConical size={18} className="text-indigo-600" /> Lab Tasks</h3>
+                  <button onClick={() => navigate("/student/lab-tasks")} className="text-xs font-semibold text-indigo-600 hover:underline inline-flex items-center gap-0.5">Submit lab work <ChevronRight size={13} /></button>
+                </div>
+                {labApi.loading ? <Skeleton className="h-20 w-full rounded-xl" /> : labTasks.length === 0 ? (
+                  <EmptyState icon="FlaskConical" title="No lab tasks yet" description="Lab tasks posted by your instructor will appear here." className="py-6" />
+                ) : (
+                  <div className="space-y-2">
+                    {labTasks.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between p-3 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-sm text-app truncate">{t.title}</p>
+                          <p className="text-xs text-muted-app">Due {fmtDate(t.dueDate)} · {t.totalMarks} marks</p>
+                        </div>
+                        <span className="text-xs font-bold">{t.submission?.marks != null ? `${t.submission.marks} / ${t.totalMarks}` : t.submission ? "Submitted" : "Not submitted"}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {labCat && (
+                <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
+                  <h3 className="font-bold text-app mb-2 flex items-center gap-2"><CalendarCheck size={18} /> Lab Weightage</h3>
+                  <p className="text-sm text-muted-app">Lab counts for <b className="text-app">{labCat.weight}%</b> of this course · earned so far <b className="text-indigo-700 dark:text-indigo-300">{Number(labCat.obtained || 0).toFixed(2)}</b></p>
+                </div>
+              )}
+            </div>
+          ) : (
+          <div className="space-y-6">
           {/* Attendance summary */}
           {att && (
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -98,10 +152,16 @@ const CourseDetail = () => {
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-5">
               <h3 className="font-bold text-app mb-3 flex items-center gap-2"><CalendarCheck size={18} /> Assessment Weights</h3>
               <div className="flex flex-wrap gap-2">
-                <Badge color="blue">Assignments {offering.assignmentWeight}%</Badge>
-                <Badge color="purple">Quizzes {offering.quizWeight}%</Badge>
-                <Badge color="amber">Midterm {offering.midWeight}%</Badge>
-                <Badge color="rose">Final {offering.finalWeight}%</Badge>
+                {theoryCats.length ? theoryCats.map((c, i) => (
+                  <Badge key={c.key} color={["blue", "purple", "amber", "rose", "emerald", "slate"][i % 6]}>{c.label} {c.weight}%</Badge>
+                )) : (
+                  <>
+                    <Badge color="blue">Assignments {offering.assignmentWeight}%</Badge>
+                    <Badge color="purple">Quizzes {offering.quizWeight}%</Badge>
+                    <Badge color="amber">Midterm {offering.midWeight}%</Badge>
+                    <Badge color="rose">Final {offering.finalWeight}%</Badge>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -149,6 +209,8 @@ const CourseDetail = () => {
               </div>
             )}
           </div>
+          </div>
+          )}
         </div>
       )}
     </div>
