@@ -15,9 +15,9 @@ const STATUS_CLS = {
 const fmt = (n) => `Rs. ${n.toLocaleString()}`;
 
 const Fees = () => {
-  const [filters, setFilters] = useState({ semester: "all", course: "all", section: "all", session: "all", program: "all", status: "all" });
+  const [filters, setFilters] = useState({ semester: "all", course: "all", session: "all", program: "all", status: "all" });
   const onFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
-  const reset = () => setFilters({ semester: "all", course: "all", section: "all", session: "all", program: "all", status: "all" });
+  const reset = () => setFilters({ semester: "all", course: "all", session: "all", program: "all", status: "all" });
 
   const rows = useMemo(() => feeRecords.filter((r) => {
     if (filters.semester !== "all" && String(r.semester) !== filters.semester) return false;

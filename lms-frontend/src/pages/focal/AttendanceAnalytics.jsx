@@ -18,7 +18,7 @@ const STATUS_COLOR = { Excellent: "emerald", Good: "blue", Average: "amber", Cri
 
 const AttendanceAnalytics = () => {
   const { data, loading, error, reload } = useApi(() => api.focal.attendance(), []);
-  const [filters, setFilters] = useState({ semester: "all", course: "all", section: "all", program: "all", session: "all", range: "all" });
+  const [filters, setFilters] = useState({ semester: "all", course: "all", program: "all", session: "all", range: "all" });
   const isFocal = useIsFocalPerson(); // Req #3: hide cross-department filters for focal role
 
   const students = data?.students || [];
@@ -107,7 +107,7 @@ const AttendanceAnalytics = () => {
               ]},
             ]}
             onChange={(k, v) => setFilters((f) => ({ ...f, [k]: v }))}
-            onReset={() => setFilters({ semester: "all", course: "all", section: "all", program: "all", session: "all", range: "all" })}
+            onReset={() => setFilters({ semester: "all", course: "all", program: "all", session: "all", range: "all" })}
             extra={<ExportButtons title="Attendance Analytics" columns={columns} rows={filtered} filename="attendance_analytics" />}
           />
 

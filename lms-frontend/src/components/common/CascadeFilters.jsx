@@ -6,11 +6,12 @@
 //     Department  (select first)
 //       └─ Program      (only programs of the selected department)
 //            └─ Semester (only semesters of the selected program)
-//     + optional Session / Batch / Section / Course selects.
+//     + optional Session / Batch / Course selects. (Sections were removed
+//       from the LMS — B1.e — a legacy "section" field is ignored.)
 //
 //  Data source: api.exam.filters() which already returns
 //     { departments, programs[{code,name,shortForm,department,totalSemesters}],
-//       semestersByProgram, sections, courses, sessions }
+//       semestersByProgram, courses, sessions }
 //
 //  Design goals (per spec): professional, clean, user-friendly,
 //  fully functional cascading behaviour with zero backend/schema
@@ -26,12 +27,12 @@ export const ALL = "all";
 
 // Build a clean empty value object for the enabled fields.
 export function emptyCascade() {
-  return { department: ALL, program: ALL, semester: ALL, session: ALL, batch: ALL, section: ALL, course: ALL };
+  return { department: ALL, program: ALL, semester: ALL, session: ALL, batch: ALL, course: ALL };
 }
 
 /**
  * Filter an array of rows against a cascade value object.
- * `map` maps a row -> { department, program, semester, session, batch, section, course }.
+ * `map` maps a row -> { department, program, semester, session, batch, course }.
  * Any field left at ALL is ignored. Comparison is case-insensitive on strings.
  */
 export function applyCascade(rows = [], value = {}, map = (r) => r) {
@@ -39,7 +40,7 @@ export function applyCascade(rows = [], value = {}, map = (r) => r) {
   const eq = (a, b) => a != null && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
   return rows.filter((row) => {
     const m = map(row) || {};
-    for (const key of ["department", "program", "semester", "session", "batch", "section", "course"]) {
+    for (const key of ["department", "program", "semester", "session", "batch", "course"]) {
       const sel = value[key];
       if (!sel || sel === ALL) continue;
       const rv = m[key];
@@ -76,7 +77,7 @@ const Select = ({ icon: Icon, label, value, onChange, options, disabled, placeho
  *   onChange  (nextValue) => void
  *   fields    array of which selects to show, in order. Default:
  *             ["department","program","semester"]. Supported:
- *             department | program | semester | session | batch | section | course
+ *             department | program | semester | session | batch | course
  *   extraRows optional rows used to enrich department/session/batch options
  *             (e.g. so historical values not in the current term still show).
  *   rowMap    map fn for extraRows -> { department, session, batch }
@@ -101,7 +102,6 @@ const CascadeFilters = ({
 
   const programs = useMemo(() => data?.programs || [], [data]);
   const semestersByProgram = useMemo(() => data?.semestersByProgram || {}, [data]);
-  const sections = useMemo(() => data?.sections || [], [data]);
   const courses = useMemo(() => data?.courses || [], [data]);
 
   // Sessions/batches: prefer backend sessions, enrich with row-derived values.
@@ -168,7 +168,7 @@ const CascadeFilters = ({
           disabled={v.department === ALL} placeholderAll={v.department === ALL ? "Select Department first" : "All Programs"}
           options={scopedPrograms.map((p) => ({ value: p.shortForm || p.code, label: `${p.shortForm || p.code} — ${p.name}` }))} />;
       case "semester":
-        return <Select key="s" icon={Layers} label="Semester" value={v.semester} onChange={(x) => set({ semester: x, section: ALL, course: ALL })}
+        return <Select key="s" icon={Layers} label="Semester" value={v.semester} onChange={(x) => set({ semester: x, course: ALL })}
           disabled={v.program === ALL} placeholderAll={v.program === ALL ? "Select Program first" : "All Semesters"} options={scopedSemesters.map((s) => ({ value: s.value, label: s.label }))} />;
       case "session":
         return <Select key="se" icon={CalendarRange} label="Session" value={v.session} onChange={(x) => set({ session: x })}
@@ -176,9 +176,6 @@ const CascadeFilters = ({
       case "batch":
         return <Select key="b" icon={Users} label="Batch" value={v.batch} onChange={(x) => set({ batch: x })}
           placeholderAll="All Batches" options={batches.map((b) => ({ value: b, label: b }))} />;
-      case "section":
-        return <Select key="sec" icon={Users} label="Section" value={v.section} onChange={(x) => set({ section: x })}
-          disabled={fields.includes("semester") && v.semester === ALL} placeholderAll={fields.includes("semester") && v.semester === ALL ? "Select Semester first" : "All Sections"} options={sections.map((s) => ({ value: s, label: `Section ${s}` }))} />;
       case "course":
         return <Select key="c" icon={BookOpen} label="Course" value={v.course} onChange={(x) => set({ course: x })}
           placeholderAll="All Courses" options={scopedCourses.map((c) => ({ value: c.label, label: c.label }))} />;

@@ -18,7 +18,7 @@ const FilterPanel = ({ filters = [], onChange, onReset, extra }) => {
             <Filter size={16} className="text-primary-600 dark:text-primary-400" />
             Filters
           </div>
-          {filters.map((f) => (
+          {filters.filter((f) => f.key !== "section").map((f) => (
             <div key={f.key} className="min-w-[150px] flex-1 sm:flex-initial">
               <label className="text-[10px] font-bold uppercase tracking-wider text-muted-app block mb-1">
                 {f.label}
@@ -71,12 +71,6 @@ export const buildLmsFilters = (values = {}) => ([
     { value: "CS302", label: "CS302 — Operating Systems" },
     { value: "CS401", label: "CS401 — Web Engineering" },
     { value: "CS402", label: "CS402 — Software Engineering" },
-  ]},
-  { key: "section", label: "Section", value: values.section, options: [
-    { value: "all", label: "All Sections" },
-    { value: "A", label: "Section A" },
-    { value: "B", label: "Section B" },
-    { value: "C", label: "Section C" },
   ]},
   { key: "session", label: "Session", value: values.session, options: [
     { value: "all", label: "All Sessions" },

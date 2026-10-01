@@ -79,10 +79,10 @@ const ExamSchedule = () => {
   const [clash, setClash] = useState(null);
   const [clashChecking, setClashChecking] = useState(false);
 
-  // offeringId -> { program, semester, section, department } for cascading filters.
+  // offeringId -> { program, semester, department } for cascading filters.
   const offeringMeta = useMemo(() => {
     const m = {};
-    offerings.forEach((o) => { m[o.id] = { program: o.program, semester: o.semester, section: o.section }; });
+    offerings.forEach((o) => { m[o.id] = { program: o.program, semester: o.semester }; });
     return m;
   }, [offerings]);
 

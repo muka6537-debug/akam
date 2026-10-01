@@ -282,7 +282,7 @@ const Enrollments = () => {
                           <p className="font-semibold text-app truncate">{r.studentName}</p>
                           <p className="text-xs text-muted-app truncate">
                             {r.roll}{r.program ? ` · ${r.program}` : ""} · {r.course}
-                            {r.section ? <span className="ml-1 inline-flex items-center"><Layers size={10} className="mr-0.5" />Sec {r.section}</span> : ""}
+                            
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">

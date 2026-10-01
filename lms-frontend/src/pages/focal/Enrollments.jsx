@@ -21,7 +21,7 @@ const TYPE_BADGES = {
 
 const FocalEnrollments = () => {
   const { data, loading, error, reload } = useApi(() => api.focal.enrollments(), []);
-  const [filters, setFilters] = useState({ semester: "all", course: "all", section: "all", session: "all", program: "all", status: "all" });
+  const [filters, setFilters] = useState({ semester: "all", course: "all", session: "all", program: "all", status: "all" });
   const [busyId, setBusyId] = useState(null);
   const { toast } = useToast();
   // Department isolation (Req #3): dynamic, session-based department — never hardcoded.
@@ -31,7 +31,7 @@ const FocalEnrollments = () => {
   const rows = data?.enrollments || [];
 
   const onFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
-  const resetFilters = () => setFilters({ semester: "all", course: "all", section: "all", session: "all", program: "all", status: "all" });
+  const resetFilters = () => setFilters({ semester: "all", course: "all", session: "all", program: "all", status: "all" });
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -64,7 +64,6 @@ const FocalEnrollments = () => {
       </div>
     )},
     { key: "course",   label: "Course", render: (v) => <span className="text-xs">{v}</span> },
-    { key: "section",  label: "Section" },
     { key: "type",     label: "Type", render: (v) => (
       <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${TYPE_BADGES[v] || "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"}`}>{v}</span>
     )},

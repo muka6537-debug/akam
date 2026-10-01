@@ -85,8 +85,7 @@ const Subjects = () => {
             {cards.map((entry, i) => {
               const o = entry.offering;
               const c = o.course || {};
-              const sections = Array.isArray(o.sections) ? o.sections : [];
-              const sectionLabel = sections.length ? sections.map((s) => s.name).join(", ") : "—";
+              const programLabel = c.program ? (c.program.shortForm || c.program.name) : "—";
               const semesterLabel = c.semester?.title || (c.semester?.number ? `Semester ${c.semester.number}` : "—");
 
               // ---- LAB CARD (Req 1.1) — distinct card for the lab component ----
@@ -116,8 +115,8 @@ const Subjects = () => {
                           <dd className="font-semibold text-app">{semesterLabel}</dd>
                         </div>
                         <div>
-                          <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Section</dt>
-                          <dd className="font-semibold text-app">{sectionLabel}</dd>
+                          <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Program</dt>
+                          <dd className="font-semibold text-app">{programLabel}</dd>
                         </div>
                         <div>
                           <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Lab Credit</dt>
@@ -157,8 +156,8 @@ const Subjects = () => {
                         <dd className="font-semibold text-app">{semesterLabel}</dd>
                       </div>
                       <div>
-                        <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Section</dt>
-                        <dd className="font-semibold text-app">{sectionLabel}</dd>
+                        <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Program</dt>
+                        <dd className="font-semibold text-app">{programLabel}</dd>
                       </div>
                       <div>
                         <dt className="text-[10px] uppercase tracking-wide text-muted-app font-semibold">Credit Hours</dt>

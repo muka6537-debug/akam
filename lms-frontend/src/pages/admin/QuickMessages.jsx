@@ -21,7 +21,7 @@ import EmptyState from "../../components/common/EmptyState";
  * ======================================================================= */
 
 const QUICK_PRESETS = [
-  "Please share the latest attendance summary for your section.",
+  "Please share the latest attendance summary for your courses.",
   "Kindly upload the pending result sheets before the deadline.",
   "Reminder: faculty meeting scheduled this week. Please confirm availability.",
   "Could you provide an update on the at-risk students in your course?",

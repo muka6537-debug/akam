@@ -125,7 +125,7 @@ const ExamIncomplete = () => {
             className="mb-4"
             value={cascade}
             onChange={setCascade}
-            fields={["department", "program", "semester", "session", "batch", "section"]}
+            fields={["department", "program", "semester", "session", "batch"]}
             extraRows={rows}
             rowMap={(r) => ({ department: r.department, session: r.session, batch: r.batch })}
           />

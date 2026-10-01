@@ -8,9 +8,9 @@ import { feeRecords } from "../../data/enterpriseData";
 const fmt = (n) => `Rs. ${n.toLocaleString()}`;
 
 const Payments = () => {
-  const [filters, setFilters] = useState({ semester: "all", course: "all", section: "all", session: "all", program: "all", method: "all" });
+  const [filters, setFilters] = useState({ semester: "all", course: "all", session: "all", program: "all", method: "all" });
   const onFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
-  const reset = () => setFilters({ semester: "all", course: "all", section: "all", session: "all", program: "all", method: "all" });
+  const reset = () => setFilters({ semester: "all", course: "all", session: "all", program: "all", method: "all" });
 
   /* Only Paid + Partial */
   const rows = useMemo(() => feeRecords.filter((r) => {

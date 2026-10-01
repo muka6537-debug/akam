@@ -11,9 +11,9 @@ import { useToast } from "../../context/ToastContext";
 const fmt = (n) => `Rs. ${n.toLocaleString()}`;
 
 const Defaulters = () => {
-  const [filters, setFilters] = useState({ semester: "all", course: "all", section: "all", session: "all", program: "all" });
+  const [filters, setFilters] = useState({ semester: "all", course: "all", session: "all", program: "all" });
   const onFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
-  const reset = () => setFilters({ semester: "all", course: "all", section: "all", session: "all", program: "all" });
+  const reset = () => setFilters({ semester: "all", course: "all", session: "all", program: "all" });
   const { toast } = useToast();
 
   /* Overdue + Pending */

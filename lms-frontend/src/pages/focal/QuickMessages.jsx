@@ -17,7 +17,7 @@ import { useToast } from "../../context/ToastContext";
 
 const TEMPLATES = [
   { id: "quiz", label: "Submit Quiz Marks", text: "Reminder: Please upload the pending quiz marks for your course at the earliest." },
-  { id: "attendance", label: "Update Attendance", text: "Reminder: Kindly update the attendance records for your sections." },
+  { id: "attendance", label: "Update Attendance", text: "Reminder: Kindly update the attendance records for your courses." },
   { id: "evaluation", label: "Complete Evaluations", text: "Reminder: The course evaluation window is open. Please complete your evaluations." },
   { id: "grading", label: "Finalize Grading", text: "Reminder: Please finalize and submit the grading for your course before the deadline." },
   { id: "meeting", label: "Faculty Meeting", text: "Notice: A faculty coordination meeting is scheduled. Your attendance is requested." },

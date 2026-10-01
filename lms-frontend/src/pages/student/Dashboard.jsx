@@ -146,7 +146,7 @@ const CourseCard = ({ c, index, navigate }) => {
           <h4 className="font-display font-bold text-primary-600 dark:text-primary-400 hover:underline leading-tight line-clamp-2 min-h-[2.5em]">{c.courseTitle}</h4>
         </button>
 
-        {/* Academic meta chips: Credit Hours · Semester · Section */}
+        {/* Academic meta chips: Credit Hours · Semester */}
         <div className="flex flex-wrap items-center gap-1.5 mt-2">
           {c.creditHours != null && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">
@@ -156,11 +156,6 @@ const CourseCard = ({ c, index, navigate }) => {
           {c.semester && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-50 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300">
               <GraduationCap size={10} /> {c.semester}
-            </span>
-          )}
-          {c.section && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-              <User size={10} /> Sec {c.section}
             </span>
           )}
         </div>
@@ -272,11 +267,6 @@ const LabCard = ({ c, index, navigate }) => {
           {c.semester && (
             <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
               <GraduationCap size={10} /> {c.semester}
-            </span>
-          )}
-          {c.section && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-              <User size={10} /> Sec {c.section}
             </span>
           )}
         </div>

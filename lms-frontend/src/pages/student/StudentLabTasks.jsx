@@ -121,7 +121,6 @@ const StudentLabTasks = () => {
         <p className="text-xs opacity-90 mt-1">
           {course.program?.shortForm || course.program?.name || ""}
           {course.semester ? ` · ${course.semester.title || `Semester ${course.semester.number}`}` : ""}
-          {course.section ? ` · Sec ${course.section.name}` : ""}
         </p>
       </div>
 
@@ -271,7 +270,6 @@ const StudentLabTasks = () => {
                     <p className="text-xs text-muted-app mb-3">
                       {c.program?.shortForm || c.program?.name || ""}
                       {c.semester ? ` · ${c.semester.title || `Semester ${c.semester.number}`}` : ""}
-                      {c.section ? ` · Sec ${c.section.name}` : ""}
                     </p>
                     <div className="flex items-center gap-2 flex-wrap text-[11px] font-semibold">
                       <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-app">{tasks.length} tasks</span>

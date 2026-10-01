@@ -77,14 +77,13 @@ const ExamUFMCases = () => {
   }, [form.offeringId]);
 
   const filtered = useMemo(() => {
-    // 1.3 — cascading smart full-history filters (dept → program → semester, + session/batch/section)
+    // 1.3 — cascading smart full-history filters (dept → program → semester, + session/batch)
     let list = applyCascade(cases, cascade, (c) => ({
       department: c.department,
       program: c.program,
       semester: c.semester,
       session: c.session,
       batch: c.batch,
-      section: c.section,
     }));
     return list.filter((c) => {
       if (typeFilter !== "all" && c.examType !== typeFilter) return false;
@@ -186,7 +185,7 @@ const ExamUFMCases = () => {
             className="mb-4"
             value={cascade}
             onChange={setCascade}
-            fields={["department", "program", "semester", "session", "batch", "section"]}
+            fields={["department", "program", "semester", "session", "batch"]}
             extraRows={cases}
             rowMap={(c) => ({ department: c.department, session: c.session, batch: c.batch })}
           />

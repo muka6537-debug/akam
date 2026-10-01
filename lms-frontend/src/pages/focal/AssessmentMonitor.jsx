@@ -213,7 +213,6 @@ const StudentLabCard = ({ row, open, onToggle }) => (
             {row.semester ? ` · ${row.semester}` : ""}
             {row.session ? ` · ${row.session}` : ""}
             {row.batch ? ` · Batch ${row.batch}` : ""}
-            {row.section ? ` · Sec ${row.section}` : ""}
           </p>
         </div>
       </div>

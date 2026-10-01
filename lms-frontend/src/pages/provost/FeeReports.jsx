@@ -1,6 +1,6 @@
 // ============================================================
 //  PROVOST — Reports & Analytics
-//  Requirement 16: Department/Program/Semester/Section/
+//  Requirement 16: Department/Program/Semester/
 //   Submitted/Pending/Examination/Semester/Blocked/Unblocked
 //   reports + PDF (printable HTML) & Excel (CSV) export.
 //  100% real DB data via api.provost.feeMgmt.report / exportReport
@@ -20,7 +20,6 @@ const REPORTS = [
   { kind: "department", label: "Department-wise", icon: "Building2", color: "blue" },
   { kind: "program", label: "Program-wise", icon: "GraduationCap", color: "indigo" },
   { kind: "semester", label: "Semester-wise", icon: "Layers", color: "purple" },
-  { kind: "section", label: "Section-wise", icon: "Grid3x3", color: "cyan" },
   { kind: "submitted", label: "Submitted Fees", icon: "CheckCircle2", color: "emerald" },
   { kind: "pending", label: "Pending Fees", icon: "Clock", color: "amber" },
   { kind: "examination", label: "Examination Fees", icon: "FileSpreadsheet", color: "teal" },

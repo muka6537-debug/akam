@@ -68,7 +68,7 @@ const AdminDashboard = () => {
               Welcome, {user?.name || "Coordinator"} 🛡️
             </h1>
             <p className="text-white/85 text-sm">
-              Manage the academic program — instructors, students, courses, sections and monitoring — from one dashboard.
+              Manage the academic program — instructors, students, courses and monitoring — from one dashboard.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 relative z-10">

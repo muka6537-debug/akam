@@ -19,7 +19,7 @@ const Overview = () => {
   const studentKpis = data?.studentKpis || {};
   const courseProgress = data?.courseProgress || [];
 
-  // Section-wise distribution from live course progress (students per offering)
+  // Course-wise distribution from live course progress (students per offering)
   const sectionData = courseProgress.map((c) => ({
     name: (c.course || "").split("—")[0].trim(),
     count: c.students || 0,
@@ -42,7 +42,7 @@ const Overview = () => {
     <div>
       <PageHeader
         title="Department Overview"
-        subtitle="Snapshot view of department health: students, faculty, courses, sections."
+        subtitle="Snapshot view of department health: students, faculty, courses."
         icon="Building2"
         breadcrumb={["Focal Person", "Overview"]}
       />

@@ -62,7 +62,7 @@ const LiveClassSchedule = () => {
   const classes = data?.classes || [];
 
   const offeringLabel = (o) =>
-    `${o.courseCode} — ${o.courseTitle}${o.section ? ` (Sec ${o.section})` : ""} · ${o.teacher || "Unassigned"}`;
+    `${o.courseCode} — ${o.courseTitle} · ${o.teacher || "Unassigned"}`;
 
   const openCreate = () => {
     setEditingId(null);
