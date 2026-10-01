@@ -201,7 +201,6 @@ router.get('/offerings', asyncHandler(async (req, res) => {
     include: {
       course: { include: { program: true, semester: true } },
       term: true,
-      sections: { where: { isDeleted: false } },
       // labTasks count powers the separate Lab Card (Req 1.1) shown for every
       // course whose LmsCourse.hasLab === true.
       _count: { select: { registrations: true, assignments: true, quizzes: true, materials: true, labTasks: true } },
@@ -218,7 +217,6 @@ router.get('/offerings/:id', asyncHandler(async (req, res) => {
     include: {
       course: { include: { program: true, semester: true } },
       term: true,
-      sections: { where: { isDeleted: false }, include: { _count: { select: { registrations: true } } } },
       _count: { select: { registrations: true, assignments: true, quizzes: true, materials: true } },
     },
   });
@@ -233,7 +231,6 @@ router.get('/offerings/:id/students', asyncHandler(async (req, res) => {
     where: { offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } },
     include: {
       student: { include: { profile: true } },
-      section: true,
     },
     orderBy: { registeredAt: 'asc' },
   });
@@ -255,7 +252,6 @@ router.get('/offerings/:id/students', asyncHandler(async (req, res) => {
       address: p.address || null,
       program: p.program || null,
       photoUrl: p.photoUrl || null,
-      section: r.section ? r.section.name : null,
       registrationType: r.registrationType,
       status: r.status,
     };
@@ -499,7 +495,7 @@ router.put('/submissions/:submissionId/grade', validate([
 //  Lab tasks exist ONLY for offerings whose course has a Lab component
 //  (LmsCourse.hasLab === true). The number of lab tasks is NOT fixed —
 //  the teacher may create as many as required. Everything is organised /
-//  filterable by Semester, Section and Program. Marks uploaded here are
+//  filterable by Semester and Program. Marks uploaded here are
 //  visible to the student, Focal Person and Results in real time.
 // ============================================================
 
@@ -520,7 +516,7 @@ async function getOwnedLabOffering(req, offeringId) {
 }
 
 // Cross-offering lab tasks list for the Teacher Lab Tasks module, with
-// Semester / Section / Program filters. Only lab courses are surfaced.
+// Semester / Program filters. Only lab courses are surfaced.
 router.get('/lab-tasks', asyncHandler(async (req, res) => {
   const where = offeringWhereForTeacher(req);
   const labOfferings = await prisma.courseOffering.findMany({
@@ -528,7 +524,6 @@ router.get('/lab-tasks', asyncHandler(async (req, res) => {
     include: {
       course: { include: { program: true, semester: true } },
       term: true,
-      sections: { where: { isDeleted: false } },
       labTasks: {
         where: { isDeleted: false },
         include: { _count: { select: { submissions: true } } },
@@ -551,7 +546,6 @@ router.get('/lab-tasks', asyncHandler(async (req, res) => {
       courseTitle: o.course.title,
       program: o.course.program ? { id: o.course.program.id, shortForm: o.course.program.shortForm, name: o.course.program.name } : null,
       semester: o.course.semester ? { id: o.course.semester.id, number: o.course.semester.number, title: o.course.semester.title } : null,
-      sections: o.sections.map((s) => ({ id: s.id, name: s.name })),
       labTaskCount: o.labTasks.length,
     });
     for (const t of o.labTasks) {
@@ -566,12 +560,10 @@ router.get('/lab-tasks', asyncHandler(async (req, res) => {
         totalMarks: t.totalMarks,
         dueDate: t.dueDate,
         isPublished: t.isPublished,
-        sectionId: t.sectionId,
         courseCode: o.course.code,
         courseTitle: o.course.title,
         program: o.course.program ? { id: o.course.program.id, shortForm: o.course.program.shortForm, name: o.course.program.name } : null,
         semester: o.course.semester ? { id: o.course.semester.id, number: o.course.semester.number, title: o.course.semester.title } : null,
-        sections: o.sections.map((s) => ({ id: s.id, name: s.name })),
         submissionCount,
         graded,
         pendingGrading: submissionCount - graded,
@@ -589,14 +581,12 @@ router.get('/offerings/:id/lab-tasks', asyncHandler(async (req, res) => {
     include: { _count: { select: { submissions: true } } },
     orderBy: { createdAt: 'asc' },
   });
-  const sections = await prisma.section.findMany({ where: { offeringId: offering.id, isDeleted: false } });
   res.json({
     offering: {
       id: offering.id,
       courseCode: offering.course.code,
       courseTitle: offering.course.title,
     },
-    sections: sections.map((s) => ({ id: s.id, name: s.name })),
     labTasks,
   });
 }));
@@ -609,7 +599,7 @@ router.post('/offerings/:id/lab-tasks', uploadLmsMaterial.single('file'), valida
   const offering = await getOwnedLabOffering(req, parseInt(req.params.id, 10));
   const offeringId = offering.id;
   await assertAssessmentQuota(offering, 'lab');
-  const { title, description, totalMarks, dueDate, allowLate, isPublished, sectionId } = req.body;
+  const { title, description, totalMarks, dueDate, allowLate, isPublished } = req.body;
   const labTask = await prisma.labTask.create({
     data: {
       offeringId,
@@ -617,7 +607,6 @@ router.post('/offerings/:id/lab-tasks', uploadLmsMaterial.single('file'), valida
       description: description || null,
       totalMarks: totalMarks != null && totalMarks !== '' ? parseFloat(totalMarks) : 100,
       dueDate: dueDate.trim(),
-      sectionId: sectionId ? parseInt(sectionId, 10) : null,
       allowLate: allowLate != null ? (allowLate === true || allowLate === 'true') : true,
       isPublished: isPublished != null ? (isPublished === true || isPublished === 'true') : true,
       filePath: req.file ? `/uploads/lms-materials/${req.file.filename}` : null,
@@ -627,7 +616,6 @@ router.post('/offerings/:id/lab-tasks', uploadLmsMaterial.single('file'), valida
   // Notify enrolled students (real-time) when published.
   if (labTask.isPublished) {
     const regWhere = { offeringId, status: 'ENROLLED' };
-    if (labTask.sectionId) regWhere.sectionId = labTask.sectionId;
     const regs = await prisma.courseRegistration.findMany({ where: regWhere, select: { studentId: true } });
     for (const r of regs) {
       await notify(r.studentId, { title: 'New lab task posted', message: labTask.title, type: 'LAB_TASK', link: '/student/lab-tasks' });
@@ -644,7 +632,7 @@ router.put('/lab-tasks/:labTaskId', uploadLmsMaterial.single('file'), asyncHandl
   const before = await prisma.labTask.findUnique({ where: { id: labTaskId } });
   if (!before) throw httpError(404, 'Lab task not found');
   await getOwnedLabOffering(req, before.offeringId);
-  const { title, description, totalMarks, dueDate, allowLate, isPublished, sectionId } = req.body;
+  const { title, description, totalMarks, dueDate, allowLate, isPublished } = req.body;
   const labTask = await prisma.labTask.update({
     where: { id: labTaskId },
     data: {
@@ -652,7 +640,6 @@ router.put('/lab-tasks/:labTaskId', uploadLmsMaterial.single('file'), asyncHandl
       description: description !== undefined ? (description || null) : before.description,
       totalMarks: totalMarks != null && totalMarks !== '' ? parseFloat(totalMarks) : before.totalMarks,
       dueDate: dueDate ?? before.dueDate,
-      sectionId: sectionId !== undefined ? (sectionId ? parseInt(sectionId, 10) : null) : before.sectionId,
       allowLate: allowLate != null ? (allowLate === true || allowLate === 'true') : before.allowLate,
       isPublished: isPublished != null ? (isPublished === true || isPublished === 'true') : before.isPublished,
       filePath: req.file ? `/uploads/lms-materials/${req.file.filename}` : before.filePath,
@@ -685,11 +672,10 @@ router.get('/lab-tasks/:labTaskId/submissions', asyncHandler(async (req, res) =>
   if (!labTask) throw httpError(404, 'Lab task not found');
   await getOwnedLabOffering(req, labTask.offeringId);
   const regWhere = { offeringId: labTask.offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } };
-  if (labTask.sectionId) regWhere.sectionId = labTask.sectionId;
   const [regs, subs] = await Promise.all([
     prisma.courseRegistration.findMany({
       where: regWhere,
-      include: { student: { include: { profile: true } }, section: true },
+      include: { student: { include: { profile: true } } },
       orderBy: { registeredAt: 'asc' },
     }),
     prisma.labTaskSubmission.findMany({ where: { labTaskId } }),
@@ -703,7 +689,6 @@ router.get('/lab-tasks/:labTaskId/submissions', asyncHandler(async (req, res) =>
       studentId: r.studentId,
       rollNumber: r.student.linkedRollNumber || r.student.username,
       name: p.fullName || r.student.username,
-      section: r.section ? r.section.name : null,
       submission: s ? {
         id: s.id, status: s.status, marks: s.marks, feedback: s.feedback,
         submittedAt: s.submittedAt, fileName: s.fileName, filePath: s.filePath, content: s.content,
@@ -1308,7 +1293,7 @@ router.put('/offerings/:id/results/publish', requireMarksSession, asyncHandler(a
 
 // ============================================================
 // MARKS — real-time add / edit / delete of a single student's result
-// (semester/course/section-wise; complements the bulk gradebook save).
+// (semester/course-wise; complements the bulk gradebook save).
 // ============================================================
 // Upsert one student's component marks for an offering.
 router.put('/offerings/:id/marks/:studentId', requireMarksSession, asyncHandler(async (req, res) => {
@@ -1370,17 +1355,16 @@ router.delete('/offerings/:id/marks/:studentId', requireMarksSession, asyncHandl
 }));
 
 // ============================================================
-// STUDENT EXPORTS — Excel / PDF (Individual / Section / Course / Bulk)
+// STUDENT EXPORTS — Excel / PDF (Individual / Course / Bulk)
 // ============================================================
-// Gather rich student rows for an offering (optionally filtered by section).
-async function studentRowsForOffering(offeringId, sectionName) {
+// Gather rich student rows for an offering.
+async function studentRowsForOffering(offeringId) {
   const regs = await prisma.courseRegistration.findMany({
     where: { offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } },
-    include: { student: { include: { profile: true } }, section: true },
+    include: { student: { include: { profile: true } } },
     orderBy: { registeredAt: 'asc' },
   });
   return regs
-    .filter((r) => !sectionName || (r.section && r.section.name === sectionName))
     .map((r) => {
       const p = r.student.profile || {};
       return {
@@ -1392,7 +1376,6 @@ async function studentRowsForOffering(offeringId, sectionName) {
         email: p.email || '',
         whatsapp: p.whatsapp || '',
         gender: p.gender || '',
-        section: r.section ? r.section.name : '',
         program: p.program || '',
         status: r.status,
       };
@@ -1406,7 +1389,6 @@ function applyStudentFilters(rows, q) {
   if (q.roll) out = out.filter((r) => like(r.rollNumber, q.roll));
   if (q.cnic) out = out.filter((r) => like(r.cnic, q.cnic));
   if (q.phone) out = out.filter((r) => like(r.phone, q.phone) || like(r.whatsapp, q.phone));
-  if (q.section) out = out.filter((r) => like(r.section, q.section));
   if (q.search) out = out.filter((r) => like(r.name, q.search) || like(r.rollNumber, q.search) || like(r.cnic, q.search) || like(r.phone, q.search));
   return out;
 }
@@ -1414,7 +1396,7 @@ function applyStudentFilters(rows, q) {
 // Export a single offering's roster as Excel.
 router.get('/offerings/:id/students/export/excel', asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
-  const rows = applyStudentFilters(await studentRowsForOffering(offering.id, req.query.section), req.query);
+  const rows = applyStudentFilters(await studentRowsForOffering(offering.id), req.query);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Students');
   ws.columns = [
@@ -1426,7 +1408,6 @@ router.get('/offerings/:id/students/export/excel', asyncHandler(async (req, res)
     { header: 'WhatsApp', key: 'whatsapp', width: 16 },
     { header: 'Email', key: 'email', width: 26 },
     { header: 'Gender', key: 'gender', width: 10 },
-    { header: 'Section', key: 'section', width: 12 },
     { header: 'Program', key: 'program', width: 28 },
     { header: 'Status', key: 'status', width: 12 },
   ];
@@ -1442,7 +1423,7 @@ router.get('/offerings/:id/students/export/excel', asyncHandler(async (req, res)
 // Export a single offering's roster (or an individual student) as PDF.
 router.get('/offerings/:id/students/export/pdf', asyncHandler(async (req, res) => {
   const offering = await getOwnedOffering(req, parseInt(req.params.id, 10));
-  let rows = applyStudentFilters(await studentRowsForOffering(offering.id, req.query.section), req.query);
+  let rows = applyStudentFilters(await studentRowsForOffering(offering.id), req.query);
   if (req.query.studentRoll) rows = rows.filter((r) => r.rollNumber === req.query.studentRoll);
   const code = offering.course ? offering.course.code : `offering-${offering.id}`;
   const title = offering.course ? `${offering.course.code} — ${offering.course.title}` : `Offering ${offering.id}`;
@@ -1457,8 +1438,8 @@ router.get('/offerings/:id/students/export/pdf', asyncHandler(async (req, res) =
   doc.moveDown(0.5);
   doc.fillColor('#000');
 
-  const headers = ['Roll No', 'Name', 'Father Name', 'CNIC', 'Phone', 'Section'];
-  const widths = [90, 150, 130, 110, 90, 60];
+  const headers = ['Roll No', 'Name', 'Father Name', 'CNIC', 'Phone', 'Program'];
+  const widths = [90, 150, 130, 110, 90, 150];
   const startX = doc.x;
   const drawRow = (cells, opts = {}) => {
     const y = doc.y;
@@ -1474,7 +1455,7 @@ router.get('/offerings/:id/students/export/pdf', asyncHandler(async (req, res) =
   } else {
     rows.forEach((r) => {
       if (doc.y > 520) { doc.addPage({ margin: 36, size: 'A4', layout: 'landscape' }); drawRow(headers, { bold: true }); }
-      drawRow([r.rollNumber, r.name, r.fatherName, r.cnic, r.phone, r.section]);
+      drawRow([r.rollNumber, r.name, r.fatherName, r.cnic, r.phone, r.program]);
     });
   }
   doc.moveDown(1).fontSize(8).fillColor('#999').text(`Total: ${rows.length} student(s) · Generated ${new Date().toLocaleString()}`);
@@ -1487,7 +1468,7 @@ router.get('/students/export/excel', asyncHandler(async (req, res) => {
   const offerings = await myOfferings(req);
   const wb = new ExcelJS.Workbook();
   for (const o of offerings) {
-    const rows = applyStudentFilters(await studentRowsForOffering(o.id, req.query.section), req.query);
+    const rows = applyStudentFilters(await studentRowsForOffering(o.id), req.query);
     const name = (o.course ? o.course.code : `OFF-${o.id}`).slice(0, 28).replace(/[\\/?*[\]:]/g, '-');
     const ws = wb.addWorksheet(name || `Sheet${o.id}`);
     ws.columns = [
@@ -1499,8 +1480,7 @@ router.get('/students/export/excel', asyncHandler(async (req, res) => {
       { header: 'WhatsApp', key: 'whatsapp', width: 16 },
       { header: 'Email', key: 'email', width: 26 },
       { header: 'Gender', key: 'gender', width: 10 },
-      { header: 'Section', key: 'section', width: 12 },
-      { header: 'Status', key: 'status', width: 12 },
+        { header: 'Status', key: 'status', width: 12 },
     ];
     ws.getRow(1).font = { bold: true };
     rows.forEach((r) => ws.addRow(r));
@@ -1604,7 +1584,7 @@ async function myOfferings(req, { activeOnly = false } = {}) {
   const where = offeringWhereForTeacher(req);
   const offerings = await prisma.courseOffering.findMany({
     where,
-    include: { course: { include: { semester: true } }, term: true, sections: { where: { isDeleted: false } } },
+    include: { course: { include: { semester: true } }, term: true },
     orderBy: { id: 'desc' },
   });
   return offerings;

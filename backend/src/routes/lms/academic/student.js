@@ -266,8 +266,6 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
           teacher: { include: { profile: true } },
         },
       },
-      // The student's assigned section (e.g. "A") for this offering.
-      section: true,
     },
   });
   const offeringIds = regs.map((r) => r.offeringId);
@@ -386,7 +384,6 @@ router.get('/dashboard', asyncHandler(async (req, res) => {
       term: r.offering.term.title,
       semester: semesterLabel,
       semesterNumber: sem ? sem.number ?? null : null,
-      section: r.section ? r.section.name : null,
       teacher: ti.name,
       teacherDesignation: ti.designation,
       teacherPhotoUrl: ti.photoUrl,
@@ -456,7 +453,6 @@ router.get('/offerings/available', asyncHandler(async (req, res) => {
     include: {
       course: { include: { program: true, semester: true } },
       teacher: { include: { profile: true } },
-      sections: { where: { isDeleted: false }, include: { _count: { select: { registrations: true } } } },
       _count: { select: { registrations: true } },
     },
     orderBy: { id: 'asc' },
@@ -469,7 +465,7 @@ router.get('/registrations', asyncHandler(async (req, res) => {
   const studentId = req.lmsUser.id;
   const regs = await prisma.courseRegistration.findMany({
     where: { studentId },
-    include: { offering: { include: { course: true, term: true } }, section: true },
+    include: { offering: { include: { course: true, term: true } } },
     orderBy: { registeredAt: 'desc' },
   });
   res.json({ registrations: regs });
@@ -636,7 +632,6 @@ router.get('/courses', asyncHandler(async (req, res) => {
           _count: { select: { assignments: true, quizzes: true, materials: true, labTasks: true } },
         },
       },
-      section: true,
     },
     orderBy: { registeredAt: 'desc' },
   });
@@ -1045,14 +1040,13 @@ router.post('/assignments/:id/submit', uploadLmsSubmission.single('file'), async
 // the teacher are reflected here in real time.
 // ============================================================
 
-// Section-scope helper: which of the student's enrolled offerings are labs,
-// and the student's own section per offering (lab tasks can be section-scoped).
+// Which of the student's enrolled offerings are lab courses. (The "Section"
+// concept has been removed — every lab task applies to the whole offering.)
 async function studentLabRegistrations(studentId) {
   const regs = await prisma.courseRegistration.findMany({
     where: { studentId, status: { in: ['ENROLLED', 'COMPLETED'] } },
     include: {
       offering: { include: { course: { include: { program: true, semester: true } }, term: true } },
-      section: true,
     },
     orderBy: { registeredAt: 'desc' },
   });
@@ -1067,14 +1061,12 @@ router.get('/lab-tasks', asyncHandler(async (req, res) => {
   const courses = [];
   for (const reg of labRegs) {
     const off = reg.offering;
-    // A lab task is visible to the student when published, and either not
-    // section-scoped OR scoped to the student's own section.
+    // A lab task is visible to every enrolled student once published.
     const tasks = await prisma.labTask.findMany({
       where: {
         offeringId: off.id,
         isDeleted: false,
         isPublished: true,
-        OR: [{ sectionId: null }, ...(reg.sectionId ? [{ sectionId: reg.sectionId }] : [])],
       },
       include: { submissions: { where: { studentId } } },
       orderBy: { id: 'asc' },
@@ -1091,7 +1083,6 @@ router.get('/lab-tasks', asyncHandler(async (req, res) => {
         ? { id: off.course.semester.id, number: off.course.semester.number, title: off.course.semester.title }
         : null,
       term: off.term ? { id: off.term.id, code: off.term.code, title: off.term.title } : null,
-      section: reg.section ? { id: reg.section.id, name: reg.section.name } : null,
       labTasks: tasks.map((t) => {
         const sub = t.submissions[0] || null;
         return {
@@ -1134,10 +1125,7 @@ router.get('/lab-tasks/:id', asyncHandler(async (req, res) => {
   if (!labTask) throw httpError(404, 'Lab task not found');
   // Must be a lab course and the student must be registered.
   if (!labTask.offering || labTask.offering.course.hasLab !== true) throw httpError(404, 'Lab task not found');
-  const reg = await requireRegistered(studentId, labTask.offeringId);
-  if (labTask.sectionId && reg.sectionId && labTask.sectionId !== reg.sectionId) {
-    throw httpError(403, 'This lab task is not assigned to your section');
-  }
+  await requireRegistered(studentId, labTask.offeringId);
   const submission = await prisma.labTaskSubmission.findUnique({
     where: { labTaskId_studentId: { labTaskId: id, studentId } },
   });
@@ -1154,10 +1142,7 @@ router.post('/lab-tasks/:id/submit', uploadLmsSubmission.single('file'), asyncHa
   });
   if (!labTask) throw httpError(404, 'Lab task not found');
   if (!labTask.offering || labTask.offering.course.hasLab !== true) throw httpError(404, 'Lab task not found');
-  const reg = await requireRegistered(studentId, labTask.offeringId);
-  if (labTask.sectionId && reg.sectionId && labTask.sectionId !== reg.sectionId) {
-    throw httpError(403, 'This lab task is not assigned to your section');
-  }
+  await requireRegistered(studentId, labTask.offeringId);
 
   const now = new Date();
   const due = new Date(labTask.dueDate);
