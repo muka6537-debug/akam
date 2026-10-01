@@ -1073,7 +1073,7 @@ router.get('/finance/announcements', PROVOST, asyncHandler(async (req, res) => {
     items: items.map((a) => ({
       id: a.id, feeType: a.feeType, title: a.title, description: a.description,
       amount: a.amount, dueDate: a.dueDate, scope: a.scope, department: a.department,
-      program: a.program, semester: a.semester, section: a.section, status: a.status,
+      program: a.program, semester: a.semester, status: a.status,
       studentCount: a.studentCount, totalBilled: a.totalBilled, createdAt: a.createdAt,
     })),
     stats: {
@@ -1088,11 +1088,11 @@ router.post('/finance/announcements', PROVOST, validate([
   body('feeType').isIn(['SEMESTER', 'EXAMINATION']).withMessage('feeType must be SEMESTER or EXAMINATION.'),
   body('title').isString().trim().isLength({ min: 3 }).withMessage('Title is required (min 3 chars).'),
   body('amount').isNumeric().withMessage('Amount is required.'),
-  body('scope').optional().isIn(['UNIVERSITY', 'DEPARTMENT', 'PROGRAM', 'SEMESTER', 'SECTION']),
+  body('scope').optional().isIn(['UNIVERSITY', 'DEPARTMENT', 'PROGRAM', 'SEMESTER']),
 ]), asyncHandler(async (req, res) => {
   const {
     feeType, title, description, amount, dueDate,
-    scope = 'UNIVERSITY', department, program, semester, section,
+    scope = 'UNIVERSITY', department, program, semester,
   } = req.body;
 
   const ann = await prisma.lmsFeeAnnouncement.create({
@@ -1106,7 +1106,6 @@ router.post('/finance/announcements', PROVOST, validate([
       department: department || null,
       program: program || null,
       semester: semester != null && semester !== '' ? parseInt(semester, 10) : null,
-      section: section || null,
       status: 'ACTIVE',
       createdById: req.lmsUser.id,
     },
@@ -1159,13 +1158,12 @@ router.get('/finance/filter-options', PROVOST, asyncHandler(async (req, res) => 
     departments: distinct(list.map((p) => p.department)).sort(),
     programs: distinct(list.map((p) => p.program)).sort(),
     semesters: distinct(list.map((p) => p.semester)).sort((a, b) => a - b),
-    sections: distinct(list.map((p) => p.section)).sort(),
   });
 }));
 
 // ------------------------------------------------------------
 // Shared builder: full fee record rows enriched with position.
-// Supports filters: department, program, semester, section, status, feeType, q.
+// Supports filters: department, program, semester, status, feeType, q.
 // ------------------------------------------------------------
 async function buildFeeRecords(query) {
   const positions = await resolveStudentPositions();
@@ -1186,7 +1184,6 @@ async function buildFeeRecords(query) {
       program: c.program || pos.program || '',
       department: c.department || pos.department || '',
       semester: c.semester != null ? c.semester : pos.semester,
-      section: c.section || pos.section || '',
       title: c.title,
       feeType: c.feeType || '—',
       amount: c.totalAmount,
@@ -1205,7 +1202,6 @@ async function buildFeeRecords(query) {
   if (f('department')) rows = rows.filter((r) => r.department === f('department'));
   if (f('program')) rows = rows.filter((r) => r.program === f('program'));
   if (f('semester')) rows = rows.filter((r) => String(r.semester) === f('semester'));
-  if (f('section')) rows = rows.filter((r) => r.section === f('section'));
   if (f('status')) rows = rows.filter((r) => r.status.toLowerCase() === f('status').toLowerCase());
   if (f('q')) {
     const q = f('q').toLowerCase();
@@ -1254,7 +1250,7 @@ router.get('/finance/submitted', PROVOST, asyncHandler(async (req, res) => {
 
 // ------------------------------------------------------------
 // 6. ADVANCED STUDENT SEARCH
-//    filters: q (name/roll/cnic), program, semester, section, department
+//    filters: q (name/roll/cnic), program, semester, department
 // ------------------------------------------------------------
 router.get('/finance/students', PROVOST, asyncHandler(async (req, res) => {
   const positions = await resolveStudentPositions();
@@ -1280,7 +1276,6 @@ router.get('/finance/students', PROVOST, asyncHandler(async (req, res) => {
       program: p.program,
       department: p.department,
       semester: p.semester,
-      section: p.section,
       paid: a.paid,
       pending: a.pending,
       total: a.total,
@@ -1298,7 +1293,6 @@ router.get('/finance/students', PROVOST, asyncHandler(async (req, res) => {
   if (f('program')) list = list.filter((r) => r.program === f('program'));
   if (f('department')) list = list.filter((r) => r.department === f('department'));
   if (f('semester')) list = list.filter((r) => String(r.semester) === f('semester'));
-  if (f('section')) list = list.filter((r) => r.section === f('section'));
 
   list.sort((a, b) => (a.roll || '').localeCompare(b.roll || ''));
   res.json({ items: list, total: list.length });
@@ -1323,7 +1317,7 @@ router.get('/finance/students/:id/profile', PROVOST, asyncHandler(async (req, re
   const mapChallan = (c) => ({
     id: c.id, challanNo: c.challanNo, title: c.title, feeType: c.feeType || '—',
     amount: c.totalAmount, status: challanStatusLabel(c), rawStatus: c.status,
-    semester: c.semester, section: c.section, dueDate: c.dueDate, paidAt: c.paidAt,
+    semester: c.semester, dueDate: c.dueDate, paidAt: c.paidAt,
     paymentRef: c.paymentRef, createdAt: c.createdAt,
   });
 
@@ -1340,7 +1334,6 @@ router.get('/finance/students/:id/profile', PROVOST, asyncHandler(async (req, re
       programName: pos.programName,
       department: pos.department,
       semester: pos.semester,
-      section: pos.section,
       email: pos.email,
       phone: pos.phone,
       registrationNumber: pos.registrationNumber,
@@ -1363,7 +1356,7 @@ router.get('/finance/students/:id/profile', PROVOST, asyncHandler(async (req, re
     })),
     blockHistory: blocks.map((b) => ({
       id: b.id, reason: b.reason, blockedAt: b.blockedAt, unblockedAt: b.unblockedAt,
-      unblockNote: b.unblockNote, semester: b.semester, section: b.section,
+      unblockNote: b.unblockNote, semester: b.semester,
       active: b.unblockedAt === null,
     })),
   });
@@ -1429,7 +1422,6 @@ router.post('/finance/students/:id/block', PROVOST, validate([
       studentId,
       reason: String(req.body.reason).trim(),
       semester: pos.semester != null ? pos.semester : null,
-      section: pos.section || null,
       program: pos.program || null,
       department: pos.department || null,
       blockedById: req.lmsUser.id,
@@ -1451,7 +1443,7 @@ router.post('/finance/students/:id/unblock', PROVOST, asyncHandler(async (req, r
   const open = await prisma.lmsStudentBlock.findFirst({ where: { studentId, unblockedAt: null }, orderBy: { blockedAt: 'desc' } });
   if (!open) throw httpError(404, 'No active block found for this student.');
 
-  // Continuation-after-unblock: the position snapshot (semester/section/
+  // Continuation-after-unblock: the position snapshot (semester/
   // program/department) stored at block time is preserved on the row, so
   // the student resumes from exactly the same academic position. We do NOT
   // touch their registrations / enrollment, guaranteeing no data loss.
@@ -1465,17 +1457,16 @@ router.post('/finance/students/:id/unblock', PROVOST, asyncHandler(async (req, r
   });
   await notify(studentId, {
     title: 'Account Unblocked',
-    message: 'Your account has been unblocked. You may continue from your current semester and section.',
+    message: 'Your account has been unblocked. You may continue from your current semester.',
     type: 'FEE',
   });
   await audit(req, 'PROVOST_STUDENT_UNBLOCK', 'LmsStudentBlock', updated.id, {
-    after: { studentId, resumeSemester: updated.semester, resumeSection: updated.section },
+    after: { studentId, resumeSemester: updated.semester },
   });
   res.json({
     block: updated,
     continuation: {
       semester: updated.semester,
-      section: updated.section,
       program: updated.program,
       department: updated.department,
       message: 'Student continues from the same academic position. No records lost.',
@@ -1511,7 +1502,6 @@ router.post('/finance/students/bulk-block', PROVOST, validate([
         studentId,
         reason,
         semester: pos.semester != null ? pos.semester : null,
-        section: pos.section || null,
         program: pos.program || null,
         department: pos.department || null,
         blockedById: req.lmsUser.id,
@@ -1566,10 +1556,10 @@ router.post('/finance/students/bulk-unblock', PROVOST, validate([
     });
     await notify(studentId, {
       title: 'Account Unblocked',
-      message: 'Your account has been unblocked. You may continue from your current semester and section.',
+      message: 'Your account has been unblocked. You may continue from your current semester.',
       type: 'FEE',
     }).catch(() => {});
-    restored.push({ studentId, semester: updated.semester, section: updated.section });
+    restored.push({ studentId, semester: updated.semester });
   }
   await audit(req, 'PROVOST_STUDENT_BULK_UNBLOCK', 'LmsStudentBlock', null, {
     after: { count: restored.length, studentIds: restored.map((r) => r.studentId) },
@@ -1593,7 +1583,7 @@ router.get('/finance/blocked', PROVOST, asyncHandler(async (req, res) => {
       return {
         id: b.id, studentId: b.studentId, name: p.fullName || b.studentId, roll: p.rollNumber || '',
         program: b.program || p.program, department: b.department || p.department,
-        semester: b.semester != null ? b.semester : p.semester, section: b.section || p.section,
+        semester: b.semester != null ? b.semester : p.semester,
         reason: b.reason, blockedAt: b.blockedAt,
       };
     }),
@@ -1603,7 +1593,7 @@ router.get('/finance/blocked', PROVOST, asyncHandler(async (req, res) => {
 
 // ------------------------------------------------------------
 // 16. REPORTS + EXPORT (PDF via printable HTML, Excel via CSV)
-//   kinds: department | program | semester | section | submitted |
+//   kinds: department | program | semester | submitted |
 //          pending | examination | semesterfee | blocked | unblocked
 // ------------------------------------------------------------
 async function buildReport(kind, query) {
@@ -1632,8 +1622,8 @@ async function buildReport(kind, query) {
     const filtered = rows.filter(filterFn);
     return {
       title: label,
-      columns: ['Roll', 'Student', 'Program', 'Dept', 'Sem', 'Sec', 'Fee Type', 'Amount (Rs.)', 'Status'],
-      rows: filtered.map((r) => [r.roll, r.student, r.program, r.department, r.semester, r.section, r.feeType, r.amount, r.status]),
+      columns: ['Roll', 'Student', 'Program', 'Dept', 'Sem', 'Fee Type', 'Amount (Rs.)', 'Status'],
+      rows: filtered.map((r) => [r.roll, r.student, r.program, r.department, r.semester, r.feeType, r.amount, r.status]),
     };
   };
 
@@ -1641,7 +1631,6 @@ async function buildReport(kind, query) {
     case 'department': return groupBy((r) => r.department, 'Department-wise Fee Report');
     case 'program': return groupBy((r) => r.program, 'Program-wise Fee Report');
     case 'semester': return groupBy((r) => (r.semester != null ? `Semester ${r.semester}` : '—'), 'Semester-wise Fee Report');
-    case 'section': return groupBy((r) => r.section, 'Section-wise Fee Report');
     case 'submitted': return listBy((r) => r.rawStatus === 'PAID', 'Submitted Fee Report');
     case 'pending': return listBy((r) => r.rawStatus !== 'PAID' && r.rawStatus !== 'WAIVED', 'Pending Fee Report');
     case 'examination': return listBy((r) => r.feeType === 'EXAMINATION', 'Examination Fee Report');
@@ -1650,16 +1639,16 @@ async function buildReport(kind, query) {
       const open = await prisma.lmsStudentBlock.findMany({ where: { unblockedAt: null }, orderBy: { blockedAt: 'desc' } });
       return {
         title: 'Blocked Students Report',
-        columns: ['Roll', 'Student', 'Program', 'Sem', 'Sec', 'Reason', 'Blocked On'],
-        rows: open.map((b) => { const p = positions.get(b.studentId) || {}; return [p.rollNumber || '', p.fullName || b.studentId, b.program || p.program, b.semester, b.section, b.reason, new Date(b.blockedAt).toISOString().slice(0, 10)]; }),
+        columns: ['Roll', 'Student', 'Program', 'Sem', 'Reason', 'Blocked On'],
+        rows: open.map((b) => { const p = positions.get(b.studentId) || {}; return [p.rollNumber || '', p.fullName || b.studentId, b.program || p.program, b.semester, b.reason, new Date(b.blockedAt).toISOString().slice(0, 10)]; }),
       };
     }
     case 'unblocked': {
       const closed = await prisma.lmsStudentBlock.findMany({ where: { unblockedAt: { not: null } }, orderBy: { unblockedAt: 'desc' } });
       return {
         title: 'Unblocked Students Report',
-        columns: ['Roll', 'Student', 'Program', 'Sem', 'Sec', 'Reason', 'Unblocked On'],
-        rows: closed.map((b) => { const p = positions.get(b.studentId) || {}; return [p.rollNumber || '', p.fullName || b.studentId, b.program || p.program, b.semester, b.section, b.reason, new Date(b.unblockedAt).toISOString().slice(0, 10)]; }),
+        columns: ['Roll', 'Student', 'Program', 'Sem', 'Reason', 'Unblocked On'],
+        rows: closed.map((b) => { const p = positions.get(b.studentId) || {}; return [p.rollNumber || '', p.fullName || b.studentId, b.program || p.program, b.semester, b.reason, new Date(b.unblockedAt).toISOString().slice(0, 10)]; }),
       };
     }
     default: return groupBy((r) => r.department, 'Department-wise Fee Report');

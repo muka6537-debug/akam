@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 //  Pure data helpers used by the Provost finance routes:
 //    - resolveStudentPositions(): map each student → their current
-//      academic position (program / department / semester / section)
+//      academic position (program / department / semester)
 //      derived from real CourseRegistration → CourseOffering →
 //      LmsCourse → LmsSemester / Section data, with a fallback to the
 //      LmsStudentProfile snapshot.
@@ -24,7 +24,7 @@ function safeParse(str, fallback) {
 // Resolve every student's current academic position from REAL data.
 // Returns a Map<studentId, {
 //   studentId, rollNumber, fullName, cnic, fatherName,
-//   program, programShortForm, department, semester, section,
+//   program, programShortForm, department, semester,
 //   email, phone
 // }>
 // ------------------------------------------------------------
@@ -45,11 +45,10 @@ async function resolveStudentPositions() {
     },
   });
 
-  // Pull each student's ENROLLED registrations with the semester/section info.
+  // Pull each student's ENROLLED registrations with the semester info.
   const regs = await prisma.courseRegistration.findMany({
     where: { status: 'ENROLLED' },
     include: {
-      section: { select: { name: true } },
       offering: {
         select: {
           term: { select: { isCurrent: true, id: true } },
@@ -60,25 +59,23 @@ async function resolveStudentPositions() {
   });
 
   // For each student pick the "current" position: prefer the current term;
-  // otherwise the highest semester number seen. Section = most common section.
+  // otherwise the highest semester number seen.
   const byStudent = {};
   for (const r of regs) {
     const sid = r.studentId;
     const semNum = r.offering?.course?.semester?.number ?? null;
-    const secName = r.section?.name ?? null;
     const progCode = r.offering?.course?.program?.code ?? null;
     const deptName = r.offering?.course?.program?.department ?? null;
     const isCurrent = !!r.offering?.term?.isCurrent;
-    if (!byStudent[sid]) byStudent[sid] = { positions: [], sections: {} };
+    if (!byStudent[sid]) byStudent[sid] = { positions: [] };
     byStudent[sid].positions.push({ semNum, isCurrent, progCode, deptName });
-    if (secName) byStudent[sid].sections[secName] = (byStudent[sid].sections[secName] || 0) + 1;
   }
 
   const map = new Map();
   for (const s of students) {
     const p = s.profile || {};
     const agg = byStudent[s.id];
-    let semester = null; let section = null; let progCode = null; let deptName = null;
+    let semester = null; let progCode = null; let deptName = null;
 
     if (agg) {
       // Prefer current-term positions.
@@ -88,9 +85,6 @@ async function resolveStudentPositions() {
       semester = pool.reduce((m, x) => (x.semNum != null && x.semNum > (m ?? -1) ? x.semNum : m), null);
       progCode = pool.find((x) => x.progCode)?.progCode || null;
       deptName = pool.find((x) => x.deptName)?.deptName || null;
-      // Section = most-registered section name.
-      const secEntries = Object.entries(agg.sections);
-      if (secEntries.length) section = secEntries.sort((a, b) => b[1] - a[1])[0][0];
     }
 
     map.set(s.id, {
@@ -104,7 +98,6 @@ async function resolveStudentPositions() {
       programName: p.program || '',
       department: deptName || p.department || '',
       semester: semester != null ? semester : null,
-      section: section || null,
       email: p.email || s.email || '',
       phone: p.phone || '',
       whatsapp: p.whatsapp || '',
@@ -134,12 +127,8 @@ function studentMatchesScope(pos, ann) {
     const progOk = !ann.program || pos.program === ann.program;
     return semOk && progOk;
   }
-  if (scope === 'SECTION') {
-    const secOk = ann.section && pos.section === ann.section;
-    const progOk = !ann.program || pos.program === ann.program;
-    const semOk = ann.semester == null || Number(pos.semester) === Number(ann.semester);
-    return secOk && progOk && semOk;
-  }
+  // Legacy 'SECTION' scope: Sections were removed from the LMS (B1.e) — such
+  // announcements never match a student any more.
   return false;
 }
 
@@ -182,7 +171,6 @@ async function generateChallansForAnnouncement(ann, positionsMap) {
         program: pos.program || null,
         department: pos.department || null,
         semester: pos.semester != null ? pos.semester : null,
-        section: pos.section || null,
         description: ann.description || null,
         sourceAnnouncementId: ann.id,
       },
