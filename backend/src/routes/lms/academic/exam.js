@@ -92,7 +92,7 @@ async function programDeptMap() {
 
 // ------------------------------------------------------------
 // Offering → rich academic context map (program / semester /
-// section / department). Used to enrich UFM cases, incomplete
+// department). Used to enrich UFM cases, incomplete
 // results etc. so the cascading smart filters can operate over
 // the complete historical record (§1.3 / §1.6).
 // ------------------------------------------------------------
@@ -101,7 +101,7 @@ async function offeringContextMap(offeringIds) {
   if (!ids.length) return {};
   const offerings = await prisma.courseOffering.findMany({
     where: { id: { in: ids } },
-    include: { course: { include: { program: true, semester: true } }, sections: true, term: true },
+    include: { course: { include: { program: true, semester: true } }, term: true },
   });
   const map = {};
   for (const o of offerings) {
@@ -110,7 +110,6 @@ async function offeringContextMap(offeringIds) {
       programName: o.course?.program?.name || null,
       department: o.course?.program?.department || null,
       semester: o.course?.semester ? String(o.course.semester.number) : null,
-      section: (o.sections || [])[0]?.name || null,
       session: o.term?.title || null,
       teacherId: o.teacherId || null,
     };
@@ -548,7 +547,7 @@ router.put('/papers/:id/review', EXAM, validate([
 // RESULTS — Mid / Final / Overall (GPA-aware)
 // ============================================================
 router.get('/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  const { component = 'overall', status, department, program, semester, section, courseId, session } = req.query; // mid | final | overall
+  const { component = 'overall', status, department, program, semester, courseId, session } = req.query; // mid | final | overall
   const sessionTerm = session ? await prisma.academicTerm.findFirst({ where: { OR: [{ id: Number(session) || -1 }, { code: session }] } }) : null;
   const term = sessionTerm || await currentTerm();
   const termId = term ? term.id : -1;
@@ -558,7 +557,7 @@ router.get('/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
   const results = await prisma.courseResult.findMany({
     where,
     include: {
-      offering: { include: { course: { include: { program: true, semester: true } }, sections: true } },
+      offering: { include: { course: { include: { program: true, semester: true } } } },
       student: { include: { profile: true } },
     },
     orderBy: { id: 'desc' },
@@ -566,7 +565,6 @@ router.get('/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
   let rows = results.map((r) => {
     const course = r.offering?.course;
     const prof = r.student?.profile;
-    const sectionName = (r.offering?.sections || [])[0]?.name || null;
     const base = {
       id: r.id, studentId: r.studentId,
       student: prof?.fullName || r.student?.username || r.studentId,
@@ -576,7 +574,6 @@ router.get('/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
       department: course?.program?.department || prof?.department || null,
       program: course?.program?.shortForm || course?.program?.code || prof?.programShortForm || prof?.program || null,
       semester: course?.semester ? String(course.semester.number) : null,
-      section: sectionName,
       status: r.status, letterGrade: r.letterGrade, gradePoints: r.gradePoints,
     };
     if (component === 'mid') return { ...base, marks: r.midMarks, max: r.midMax, percent: r.midMax ? Math.round((r.midMarks / r.midMax) * 1000) / 10 : 0 };
@@ -590,7 +587,6 @@ router.get('/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
   if (department) rows = rows.filter((r) => r.department === department);
   if (program) rows = rows.filter((r) => r.program === program);
   if (semester) rows = rows.filter((r) => String(r.semester) === String(semester));
-  if (section) rows = rows.filter((r) => r.section === section);
   res.json({ term: term?.title || null, component, results: rows });
 }));
 
@@ -825,7 +821,6 @@ const ufmRow = (e, names, labels, ctxMap = {}, stuCtx = {}) => {
     department: ctx.department || sctx.department || null,
     program: ctx.program || sctx.program || null,
     semester: ctx.semester || null,
-    section: ctx.section || null,
     session: sctx.session || ctx.session || null,
     batch: sctx.batch || null,
     examType,
@@ -1020,7 +1015,7 @@ router.get('/reports/:kind', EXAM_OR_GOV, asyncHandler(async (req, res) => {
 
   if (kind === 'incomplete') {
     // registrations with no published result — enriched with teacher,
-    // semester, program, section, session so the Incomplete Results
+    // semester, program, session so the Incomplete Results
     // module (§1.6) shows teacher/semester/course and supports cascading
     // smart filters.
     const regs = await prisma.courseRegistration.findMany({
@@ -1029,7 +1024,7 @@ router.get('/reports/:kind', EXAM_OR_GOV, asyncHandler(async (req, res) => {
         offering: {
           include: {
             course: { include: { program: true, semester: true } },
-            sections: true, term: true,
+            term: true,
           },
         },
       },
@@ -1056,7 +1051,6 @@ router.get('/reports/:kind', EXAM_OR_GOV, asyncHandler(async (req, res) => {
           department: o?.course?.program?.department || sctx.department || null,
           program: o?.course?.program?.shortForm || o?.course?.program?.code || sctx.program || null,
           semester: o?.course?.semester ? String(o.course.semester.number) : null,
-          section: (o?.sections || [])[0]?.name || null,
           session: o?.term?.title || sctx.session || null,
           batch: sctx.batch || null,
           status: result ? 'DRAFT' : 'NO_RESULT',
@@ -1064,11 +1058,10 @@ router.get('/reports/:kind', EXAM_OR_GOV, asyncHandler(async (req, res) => {
       }
     }
     const departments = [...new Set(rows.map((r) => r.department).filter(Boolean))].sort();
-    const { department, program, semester, section, session, batch } = req.query;
+    const { department, program, semester, session, batch } = req.query;
     if (department) rows = rows.filter((r) => r.department === department);
     if (program) rows = rows.filter((r) => r.program === program);
     if (semester) rows = rows.filter((r) => String(r.semester) === String(semester));
-    if (section) rows = rows.filter((r) => r.section === section);
     if (session) rows = rows.filter((r) => r.session === session);
     if (batch) rows = rows.filter((r) => String(r.batch) === String(batch));
     return res.json({ report: 'incomplete', rows, departments });
@@ -1218,7 +1211,6 @@ router.get('/offerings', EXAM_OR_GOV, asyncHandler(async (req, res) => {
     where: { termId, isDeleted: false },
     include: {
       course: { include: { program: true, semester: true } },
-      sections: true,
       _count: { select: { registrations: true } },
     },
     orderBy: { id: 'asc' },
@@ -1234,7 +1226,6 @@ router.get('/offerings', EXAM_OR_GOV, asyncHandler(async (req, res) => {
       department: o.course?.program?.department || null,
       program: o.course?.program?.shortForm || o.course?.program?.code || null,
       semester: o.course?.semester ? String(o.course.semester.number) : null,
-      section: (o.sections || [])[0]?.name || null,
       teacherId: o.teacherId,
       teacher: o.teacherId ? teacherNames[o.teacherId] || o.teacherId : null,
       students: o._count?.registrations || 0,
@@ -1966,7 +1957,7 @@ router.get('/filters', EXAM_OR_GOV, asyncHandler(async (req, res) => {
     prisma.academicTerm.findMany({ where: { isActive: true }, orderBy: { id: 'desc' } }),
     prisma.courseOffering.findMany({
       where: { isDeleted: false },
-      include: { course: { include: { program: true, semester: true } }, sections: true },
+      include: { course: { include: { program: true, semester: true } } },
     }),
     prisma.lmsStudentProfile.findMany({
       select: { program: true, programShortForm: true, department: true, session: true },
@@ -1982,11 +1973,9 @@ router.get('/filters', EXAM_OR_GOV, asyncHandler(async (req, res) => {
     semestersByProgram[p.code] = sems.map((s) => ({ value: String(s.number), label: s.title }));
   }
 
-  // Sections (distinct names) and courses derived from offerings.
-  const sectionSet = new Set();
+  // Courses derived from offerings.
   const courses = [];
   for (const o of offerings) {
-    (o.sections || []).forEach((s) => sectionSet.add(s.name));
     if (o.course) {
       courses.push({
         offeringId: o.id,
@@ -2008,7 +1997,6 @@ router.get('/filters', EXAM_OR_GOV, asyncHandler(async (req, res) => {
     departments,
     programs: programs.map((p) => ({ code: p.code, name: p.name, shortForm: p.shortForm, department: p.department, totalSemesters: p.totalSemesters })),
     semestersByProgram,
-    sections: Array.from(sectionSet).sort(),
     courses,
     sessions: terms.map((t) => ({ id: t.id, code: t.code, title: t.title, isCurrent: t.isCurrent })),
   });
@@ -2049,7 +2037,7 @@ router.get('/datesheets', EXAM_OR_GOV, asyncHandler(async (req, res) => {
     entryCount: s.entries.length,
     entries: s.entries.map((e) => ({
       id: e.id, offeringId: e.offeringId, courseCode: e.courseCode, courseTitle: e.courseTitle,
-      semester: e.semester, section: e.section, date: e.date, startTime: e.startTime,
+      semester: e.semester, date: e.date, startTime: e.startTime,
       endTime: e.endTime, room: e.room,
     })),
   }));
@@ -2137,7 +2125,7 @@ router.post('/datesheets', EXAM, validate([
           offeringId: e.offeringId ? Number(e.offeringId) : null,
           courseCode: e.courseCode || null, courseTitle: e.courseTitle || null,
           semester: e.semester ? String(e.semester) : (semester ? String(semester) : null),
-          section: e.section || null, date: e.date, startTime: e.startTime || null,
+          date: e.date, startTime: e.startTime || null,
           endTime: e.endTime || null, room: e.room || null,
         })),
       },
@@ -2160,7 +2148,7 @@ router.post('/datesheets/:id/entries', EXAM, validate([
     data: {
       dateSheetId, offeringId: e.offeringId ? Number(e.offeringId) : null,
       courseCode: e.courseCode || null, courseTitle: e.courseTitle || null,
-      semester: e.semester ? String(e.semester) : sheet.semester, section: e.section || null,
+      semester: e.semester ? String(e.semester) : sheet.semester,
       date: e.date, startTime: e.startTime || null, endTime: e.endTime || null, room: e.room || null,
     },
   });
@@ -2187,7 +2175,7 @@ router.put('/datesheets/:id/entries/:entryId', EXAM, asyncHandler(async (req, re
   const entryId = Number(req.params.entryId);
   const e = req.body || {};
   const data = {};
-  ['courseCode', 'courseTitle', 'semester', 'section', 'date', 'startTime', 'endTime'].forEach((k) => {
+  ['courseCode', 'courseTitle', 'semester', 'date', 'startTime', 'endTime'].forEach((k) => {
     if (e[k] !== undefined) data[k] = e[k] === '' ? null : e[k];
   });
   const updated = await prisma.dateSheetEntry.update({ where: { id: entryId }, data });
@@ -2397,10 +2385,10 @@ router.get('/quick-messages/pending', EXAM_OR_GOV, asyncHandler(async (req, res)
 
 // ============================================================
 // RESULTS COMPILATION (was "Marks Correction") — rich filtered result
-// view + one-click compilation across semester / program / section.
+// view + one-click compilation across semester / program.
 // ============================================================
 router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  const { department, program, semester, section, courseId, studentId, status } = req.query;
+  const { department, program, semester, courseId, studentId, status } = req.query;
   const term = await currentTerm();
   const termId = term ? term.id : -1;
 
@@ -2412,7 +2400,7 @@ router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) =>
   const results = await prisma.courseResult.findMany({
     where,
     include: {
-      offering: { include: { course: { include: { program: true, semester: true } }, sections: true } },
+      offering: { include: { course: { include: { program: true, semester: true } } } },
       student: { include: { profile: true } },
     },
     orderBy: { id: 'desc' },
@@ -2421,7 +2409,6 @@ router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) =>
   let rows = results.map((r) => {
     const course = r.offering?.course;
     const prof = r.student?.profile;
-    const sectionName = (r.offering?.sections || [])[0]?.name || null;
     return {
       id: r.id, studentId: r.studentId,
       student: prof?.fullName || r.student?.username || r.studentId,
@@ -2432,7 +2419,6 @@ router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) =>
       department: course?.program?.department || prof?.department || null,
       program: course?.program?.shortForm || course?.program?.code || prof?.programShortForm || prof?.program || null,
       semester: course?.semester ? String(course.semester.number) : null,
-      section: sectionName,
       assignmentMarks: r.assignmentMarks, quizMarks: r.quizMarks,
       midMarks: r.midMarks, finalMarks: r.finalMarks,
       totalPercent: r.totalPercent, letterGrade: r.letterGrade, gradePoints: r.gradePoints,
@@ -2440,11 +2426,10 @@ router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) =>
     };
   });
 
-  // Post-filter on derived fields (program/department/semester/section).
+  // Post-filter on derived fields (program/department/semester).
   if (department) rows = rows.filter((r) => r.department === department);
   if (program) rows = rows.filter((r) => r.program === program);
   if (semester) rows = rows.filter((r) => String(r.semester) === String(semester));
-  if (section) rows = rows.filter((r) => r.section === section);
 
   res.json({
     term: term?.title || null,
@@ -2455,20 +2440,20 @@ router.get('/compilation/results', EXAM_OR_GOV, asyncHandler(async (req, res) =>
   });
 }));
 
-// Compile + publish results across a scope (semester / program / section).
+// Compile + publish results across a scope (semester / program).
 // §1.4.2 — on compile, results are published AND automatically flow into a
 // Gazette (built in gazette format). §1.5 — a fresh transcript is auto-issued
 // in real time for every affected student, so the Gazette Review and
 // transcript are always in sync with the published record.
 router.post('/compilation/compile', EXAM, asyncHandler(async (req, res) => {
-  const { program, semester, section } = req.body || {};
+  const { program, semester } = req.body || {};
   const term = await currentTerm();
   const termId = term ? term.id : -1;
 
   // Determine candidate offerings within the scope.
   const offerings = await prisma.courseOffering.findMany({
     where: { termId, isDeleted: false },
-    include: { course: { include: { program: true, semester: true } }, sections: true },
+    include: { course: { include: { program: true, semester: true } } },
   });
   const scoped = offerings.filter((o) => {
     if (program) {
@@ -2476,7 +2461,6 @@ router.post('/compilation/compile', EXAM, asyncHandler(async (req, res) => {
       if (code !== program) return false;
     }
     if (semester && o.course?.semester && String(o.course.semester.number) !== String(semester)) return false;
-    if (section && !(o.sections || []).some((s) => s.name === section)) return false;
     return true;
   });
   if (!scoped.length) throw httpError(400, 'No offerings match the selected scope.');
@@ -2497,7 +2481,7 @@ router.post('/compilation/compile', EXAM, asyncHandler(async (req, res) => {
   // §1.4.2 — auto-flow published results into a Gazette (gazette format).
   let gazette = null;
   try {
-    const rows = await buildGazetteRows({ termId, program, semester, section });
+    const rows = await buildGazetteRows({ termId, program, semester });
     if (rows.length) {
       const passCount = rows.filter((r) => r.pass).length;
       const prog = program
@@ -2506,10 +2490,10 @@ router.post('/compilation/compile', EXAM, asyncHandler(async (req, res) => {
       gazette = await prisma.gazette.create({
         data: {
           termId,
-          title: `Gazette · ${program || 'All Programs'}${semester ? ` · Sem ${semester}` : ''}${section ? ` · Sec ${section}` : ''} (auto)`,
+          title: `Gazette · ${program || 'All Programs'}${semester ? ` · Sem ${semester}` : ''} (auto)`,
           department: prog?.department || null, program: prog?.name || program || null,
           programShortForm: program || null, semester: semester ? String(semester) : null,
-          section: section || null, status: 'DRAFT',
+          status: 'DRAFT',
           totalStudents: rows.length, passCount, failCount: rows.length - passCount,
           createdById: req.lmsUser.id,
         },
@@ -2518,7 +2502,7 @@ router.post('/compilation/compile', EXAM, asyncHandler(async (req, res) => {
   } catch (e) { /* gazette auto-flow is best-effort — never block publishing */ void e; }
 
   await audit(req, 'EXAM_RESULTS_COMPILE', 'CourseOffering', scoped.map((o) => o.id).join(','), {
-    after: { scope: { program, semester, section }, offerings: scoped.length, compiled: publishedCount, gazetteId: gazette?.id || null },
+    after: { scope: { program, semester }, offerings: scoped.length, compiled: publishedCount, gazetteId: gazette?.id || null },
   });
   res.json({
     success: true, stage: 'MARKS_COLLECTION', offerings: scoped.length, compiled: publishedCount,
@@ -2586,10 +2570,10 @@ router.post('/compilation/publish', EXAM, asyncHandler(async (req, res) => {
 // ============================================================
 // GAZETTE — build / list / approve / publish / download (CSV)
 // ============================================================
-async function buildGazetteRows({ termId, program, semester, section }) {
+async function buildGazetteRows({ termId, program, semester }) {
   const offerings = await prisma.courseOffering.findMany({
     where: { termId, isDeleted: false },
-    include: { course: { include: { program: true, semester: true } }, sections: true },
+    include: { course: { include: { program: true, semester: true } } },
   });
   const scoped = offerings.filter((o) => {
     if (program) {
@@ -2597,7 +2581,6 @@ async function buildGazetteRows({ termId, program, semester, section }) {
       if (code !== program) return false;
     }
     if (semester && o.course?.semester && String(o.course.semester.number) !== String(semester)) return false;
-    if (section && !(o.sections || []).some((s) => s.name === section)) return false;
     return true;
   });
   const offeringIds = scoped.map((o) => o.id);
@@ -2622,23 +2605,23 @@ router.get('/gazettes', EXAM_OR_GOV, asyncHandler(async (req, res) => {
 }));
 
 router.post('/gazettes/build', EXAM, asyncHandler(async (req, res) => {
-  const { department, program, semester, section } = req.body || {};
+  const { department, program, semester } = req.body || {};
   const term = await currentTerm();
   const termId = term ? term.id : -1;
-  const rows = await buildGazetteRows({ termId, program, semester, section });
+  const rows = await buildGazetteRows({ termId, program, semester });
   const passCount = rows.filter((r) => r.pass).length;
   const prog = program ? await prisma.lmsProgram.findFirst({ where: { OR: [{ shortForm: program }, { code: program }] } }) : null;
   const gazette = await prisma.gazette.create({
     data: {
-      termId, title: `Gazette · ${program || 'All Programs'}${semester ? ` · Sem ${semester}` : ''}${section ? ` · Sec ${section}` : ''}`,
+      termId, title: `Gazette · ${program || 'All Programs'}${semester ? ` · Sem ${semester}` : ''}`,
       department: department || prog?.department || null, program: prog?.name || program || null,
       programShortForm: program || null, semester: semester ? String(semester) : null,
-      section: section || null, status: 'DRAFT',
+      status: 'DRAFT',
       totalStudents: rows.length, passCount, failCount: rows.length - passCount,
       createdById: req.lmsUser.id,
     },
   });
-  await audit(req, 'EXAM_GAZETTE_BUILD', 'Gazette', String(gazette.id), { after: { program, semester, section } });
+  await audit(req, 'EXAM_GAZETTE_BUILD', 'Gazette', String(gazette.id), { after: { program, semester } });
   res.status(201).json({ gazette, rows });
 }));
 
@@ -2673,15 +2656,15 @@ router.delete('/gazettes/:id', EXAM, asyncHandler(async (req, res) => {
 }));
 
 router.get('/gazettes/download', EXAM_OR_GOV, asyncHandler(async (req, res) => {
-  const { program, semester, section } = req.query;
+  const { program, semester } = req.query;
   const term = await currentTerm();
   const termId = term ? term.id : -1;
-  const rows = await buildGazetteRows({ termId, program, semester, section });
+  const rows = await buildGazetteRows({ termId, program, semester });
   const header = ['Roll No', 'Student', 'Course', 'Percent', 'Grade', 'GP', 'Result'];
   const csv = [header.join(',')].concat(
     rows.map((r) => [r.roll, `"${(r.student || '').replace(/"/g, '""')}"`, `"${(r.course || '').replace(/"/g, '""')}"`, r.percent, r.grade || '', r.gp, r.pass ? 'PASS' : 'FAIL'].join(','))
   ).join('\n');
-  const name = `gazette-${program || 'all'}${semester ? `-sem${semester}` : ''}${section ? `-sec${section}` : ''}.csv`;
+  const name = `gazette-${program || 'all'}${semester ? `-sem${semester}` : ''}.csv`;
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
   res.send(csv);
