@@ -284,59 +284,12 @@ async function deleteMaterial(req, res) {
 }
 
 // ==================================================================
-//  SECTIONS  (Course Coordinator effect)
+//  SECTIONS — REMOVED (LMS Enhancement B1.e). Legacy endpoints → 410.
 // ==================================================================
-async function listSections(req, res) {
-  try {
-    const offeringId = parseInt(req.query.offeringId, 10);
-    const where = { isDeleted: false };
-    if (offeringId) where.offeringId = offeringId;
-    const sections = await prisma.section.findMany({
-      where, orderBy: { name: 'asc' },
-      include: { teacher: { select: { id: true, username: true, email: true } }, _count: { select: { registrations: true } } },
-    });
-    res.json({ sections });
-  } catch (e) {
-    console.error('SA listSections error:', e);
-    res.status(500).json({ error: 'Failed to load sections' });
-  }
-}
-
-async function createSection(req, res) {
-  try {
-    const { offeringId, name, capacity, teacherId, room } = req.body || {};
-    if (!offeringId || !name) return res.status(400).json({ error: 'offeringId and name are required' });
-    const s = await prisma.section.create({
-      data: { offeringId: parseInt(offeringId, 10), name, capacity: Number(capacity ?? 50), teacherId: teacherId || null, room: room || null },
-    });
-    await logLmsAudit({ req, action: 'SECTION_CREATE', entity: 'Section', entityId: s.id, after: s, actorRole: 'CourseCoordinator' });
-    await logSaActivity({ req, module: 'lms', action: 'section_create', description: `Created section "${name}" in offering #${offeringId}`, metadata: { offeringId, sectionId: s.id } });
-    res.json({ success: true, section: s });
-  } catch (e) {
-    console.error('SA createSection error:', e);
-    res.status(500).json({ error: 'Failed to create section' });
-  }
-}
-
-// Move a student between sections (Course Coordinator effect).
-async function moveStudentSection(req, res) {
-  try {
-    const { registrationId, sectionId } = req.body || {};
-    if (!registrationId) return res.status(400).json({ error: 'registrationId is required' });
-    const reg = await prisma.courseRegistration.findUnique({ where: { id: parseInt(registrationId, 10) } });
-    if (!reg) return res.status(404).json({ error: 'Registration not found' });
-    const updated = await prisma.courseRegistration.update({
-      where: { id: reg.id },
-      data: { sectionId: sectionId ? parseInt(sectionId, 10) : null },
-    });
-    await logLmsAudit({ req, action: 'STUDENT_SECTION_MOVE', entity: 'CourseRegistration', entityId: reg.id, before: { sectionId: reg.sectionId }, after: { sectionId: updated.sectionId }, actorRole: 'CourseCoordinator' });
-    await logSaActivity({ req, module: 'lms', action: 'student_section_move', description: `Moved registration #${reg.id} to section ${sectionId || 'none'}`, metadata: { registrationId: reg.id, sectionId } });
-    res.json({ success: true, registration: updated });
-  } catch (e) {
-    console.error('SA moveStudentSection error:', e);
-    res.status(500).json({ error: 'Failed to move student' });
-  }
-}
+const sectionsGone = (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS.' });
+const listSections = sectionsGone;
+const createSection = sectionsGone;
+const moveStudentSection = sectionsGone;
 
 // ==================================================================
 //  TEACHER ASSIGNMENT / REPLACEMENT  (Course Coordinator effect)
@@ -384,7 +337,7 @@ async function offeringRoster(req, res) {
     const offeringId = parseInt(req.params.offeringId, 10);
     const regs = await prisma.courseRegistration.findMany({
       where: { offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } },
-      include: { student: { select: { id: true, username: true, email: true, linkedRollNumber: true } }, section: { select: { id: true, name: true } } },
+      include: { student: { select: { id: true, username: true, email: true, linkedRollNumber: true } } },
       orderBy: { registeredAt: 'asc' },
     });
     res.json({ roster: regs });

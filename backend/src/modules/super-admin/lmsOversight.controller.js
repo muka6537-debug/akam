@@ -77,7 +77,7 @@ async function listOfferings(req, res) {
           course: { select: { code: true, title: true } },
           term: { select: { code: true, title: true } },
           teacher: { select: { id: true, username: true, email: true } },
-          _count: { select: { registrations: true, sections: true } },
+          _count: { select: { registrations: true } },
         },
       }),
       prisma.courseOffering.count({ where }),

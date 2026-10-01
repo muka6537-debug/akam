@@ -36,8 +36,7 @@ const UNIVERSITY_WIDE = new Set(['EXAM_CONTROLLER', 'PROVOST']);
 /**
  * The set of teachers currently teaching a given student. A teacher is
  * "currently teaching" the student when the student has an ENROLLED
- * registration in an ACTIVE offering taught by that teacher (or a
- * section taught by that teacher).
+ * registration in an ACTIVE offering taught by that teacher.
  *
  * Returns [{ id, name, courseCodes: [], offeringIds: [] }]
  */
@@ -48,7 +47,6 @@ async function teachersForStudent(studentId) {
       offering: {
         include: { course: true, teacher: { include: { profile: true } } },
       },
-      section: { include: { teacher: { include: { profile: true } } } },
     },
   });
 
@@ -70,8 +68,7 @@ async function teachersForStudent(studentId) {
   for (const r of regs) {
     if (!r.offering || r.offering.status === 'CANCELLED' || r.offering.isDeleted) continue;
     const code = r.offering.course?.code;
-    // Prefer the section teacher when present, else the offering teacher.
-    addTeacher(r.section?.teacher, code, r.offeringId);
+    // The offering teacher handles the appeal (no Sections in the LMS).
     addTeacher(r.offering?.teacher, code, r.offeringId);
   }
 

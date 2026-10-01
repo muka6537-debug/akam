@@ -148,7 +148,6 @@ async function autoEnrollStudent(studentId) {
       status: 'ACTIVE',
       courseId: { in: courseIds },
     },
-    include: { sections: { where: { isDeleted: false }, orderBy: { id: 'asc' } } },
   });
 
   let enrolled = 0;
@@ -161,13 +160,10 @@ async function autoEnrollStudent(studentId) {
     });
     if (existing) { skipped += 1; continue; }
 
-    // Default to the first available section (auto placement).
-    const sectionId = off.sections.length ? off.sections[0].id : null;
     // eslint-disable-next-line no-await-in-loop
     await prisma.courseRegistration.create({
       data: {
         offeringId: off.id,
-        sectionId,
         studentId,
         registrationType: 'REGULAR',
         status: 'ENROLLED',

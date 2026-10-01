@@ -1,8 +1,8 @@
 // ============================================================
 //  ACADEMIC STRUCTURE ROUTES  — /api/lms/academic/*
 //  ------------------------------------------------------------
-//  Programs, Semesters, Academic Terms, Courses, Course Offerings,
-//  and Sections. These define the academic skeleton the Student +
+//  Programs, Semesters, Academic Terms, Courses, Course Offerings.
+//  These define the academic skeleton the Student +
 //  Teacher modules operate on.
 //
 //  Read access: any authenticated LMS user.
@@ -481,7 +481,7 @@ router.get('/offerings', asyncHandler(async (req, res) => {
         course: { include: { program: true, semester: true } },
         term: true,
         teacher: { select: { id: true, username: true, role: true } },
-        _count: { select: { registrations: true, sections: true } },
+        _count: { select: { registrations: true } },
       },
     }),
     prisma.courseOffering.count({ where }),
@@ -497,7 +497,6 @@ router.get('/offerings/:id', asyncHandler(async (req, res) => {
       course: { include: { program: true, semester: true } },
       term: true,
       teacher: { select: { id: true, username: true, role: true } },
-      sections: { where: { isDeleted: false } },
       _count: { select: { registrations: true } },
     },
   });
@@ -566,65 +565,13 @@ router.delete('/offerings/:id', MANAGE, asyncHandler(async (req, res) => {
 }));
 
 // ============================================================
-// SECTIONS (within an offering)
+// SECTIONS — REMOVED (LMS Enhancement B1.e). The LMS no longer has a
+// Section concept; legacy endpoints answer 410 Gone.
 // ============================================================
-router.get('/offerings/:offeringId/sections', asyncHandler(async (req, res) => {
-  const offeringId = parseInt(req.params.offeringId, 10);
-  const sections = await prisma.section.findMany({
-    where: { offeringId, isDeleted: false },
-    include: {
-      teacher: { select: { id: true, username: true } },
-      _count: { select: { registrations: true } },
-    },
-    orderBy: { name: 'asc' },
-  });
-  res.json({ sections });
-}));
-
-router.post('/offerings/:offeringId/sections', MANAGE, validate([
-  body('name').trim().notEmpty().withMessage('Section name is required'),
-]), asyncHandler(async (req, res) => {
-  const offeringId = parseInt(req.params.offeringId, 10);
-  const { name, capacity, teacherId, room } = req.body;
-  const section = await prisma.section.create({
-    data: {
-      offeringId,
-      name: name.trim(),
-      capacity: capacity ? parseInt(capacity, 10) : 150,
-      teacherId: teacherId || null,
-      room: room || null,
-    },
-  });
-  await audit(req, 'SECTION_CREATE', 'Section', section.id, { after: section });
-  res.status(201).json({ section });
-}));
-
-router.put('/sections/:id', MANAGE, asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const before = await prisma.section.findUnique({ where: { id } });
-  if (!before) throw httpError(404, 'Section not found');
-  const { name, capacity, teacherId, room } = req.body;
-  const section = await prisma.section.update({
-    where: { id },
-    data: {
-      name: name ?? before.name,
-      capacity: capacity != null ? parseInt(capacity, 10) : before.capacity,
-      teacherId: teacherId !== undefined ? (teacherId || null) : before.teacherId,
-      room: room ?? before.room,
-    },
-  });
-  await audit(req, 'SECTION_UPDATE', 'Section', id, { before, after: section });
-  res.json({ section });
-}));
-
-router.delete('/sections/:id', MANAGE, asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const section = await prisma.section.update({
-    where: { id },
-    data: { isDeleted: true, deletedAt: new Date() },
-  });
-  await audit(req, 'SECTION_DELETE', 'Section', id, { after: section });
-  res.json({ message: 'Section deleted', section });
-}));
+const sectionsRemoved = (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS.' });
+router.get('/offerings/:offeringId/sections', sectionsRemoved);
+router.post('/offerings/:offeringId/sections', MANAGE, sectionsRemoved);
+router.put('/sections/:id', MANAGE, sectionsRemoved);
+router.delete('/sections/:id', MANAGE, sectionsRemoved);
 
 module.exports = router;
