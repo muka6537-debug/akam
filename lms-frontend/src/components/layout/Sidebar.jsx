@@ -101,7 +101,7 @@ const adminMenu = [
   { label: "Course Distribution", icon: "UserCheck", to: "/admin/teacher-assignment" },
   { label: "Teacher Replacement", icon: "Replace", to: "/admin/teacher-replacement" },
   { label: "Students", icon: "Users", to: "/admin/students" },
-  { label: "Student Allocation & Sections", icon: "UsersRound", to: "/admin/student-allocation" },
+  { label: "Student Allocation", icon: "UsersRound", to: "/admin/student-allocation" },
   { label: "Enrollments", icon: "ClipboardCheck", to: "/admin/enrollments" },
   { section: "COMMUNICATION" },
   { label: "Support & Grievances", icon: "ShieldAlert", to: "/admin/appeals" },

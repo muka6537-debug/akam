@@ -67,7 +67,6 @@ import AdminCourses from "./pages/admin/Courses";
 import AdminSchemes from "./pages/admin/Schemes";
 import AdminTeachers from "./pages/admin/Teachers";
 import AdminStudents from "./pages/admin/AdminStudents";
-import AdminSections from "./pages/admin/Sections";
 import AdminEnrollments from "./pages/admin/Enrollments";
 import AdminAnnouncements from "./pages/admin/AdminAnnouncements";
 import AdminReports from "./pages/admin/Reports";
@@ -361,7 +360,7 @@ function App() {
         <Route path="schemes" element={<AdminSchemes />} />
         <Route path="teachers" element={<AdminTeachers />} />
         <Route path="students" element={<AdminStudents />} />
-        {/* Section Management merged into the unified Student Allocation & Sections module */}
+        {/* Sections removed from the LMS (B1.e) — legacy URL redirects to Student Allocation */}
         <Route path="sections" element={<Navigate to="/admin/student-allocation" replace />} />
         <Route path="enrollments" element={<AdminEnrollments />} />
         <Route path="announcements" element={<AdminAnnouncements />} />

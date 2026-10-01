@@ -112,9 +112,6 @@ const structure = {
   courses: (params = '') => get(`/lms/academic/courses${params}`),
   offerings: (params = '') => get(`/lms/academic/offerings${params}`),
   offering: (id) => get(`/lms/academic/offerings/${id}`),
-  offeringSections: (offeringId) => get(`/lms/academic/offerings/${offeringId}/sections`),
-  updateSection: (id, body) => put(`/lms/academic/sections/${id}`, body),
-  deleteSection: (id) => del(`/lms/academic/sections/${id}`),
 };
 
 // ============================================================
@@ -124,8 +121,8 @@ const student = {
   dashboard: () => get('/lms/academic/student/dashboard'),
   availableOfferings: () => get('/lms/academic/student/offerings/available'),
   registrations: () => get('/lms/academic/student/registrations'),
-  register: (offeringId, sectionId, registrationType) =>
-    post('/lms/academic/student/register', { offeringId, sectionId, registrationType }),
+  register: (offeringId, registrationType) =>
+    post('/lms/academic/student/register', { offeringId, registrationType }),
   withdraw: (registrationId) => put(`/lms/academic/student/registrations/${registrationId}/withdraw`),
   // Client requirement 4.1 — read the Focal-set withdrawal deadline (real-time).
   withdrawDeadline: () => get('/lms/academic/student/withdraw-deadline'),
@@ -287,7 +284,7 @@ const teacher = {
   labTaskSubmissions: (labTaskId) => get(`/lms/academic/teacher/lab-tasks/${labTaskId}/submissions`),
   saveLabTaskMarks: (labTaskId, studentId, body) => put(`/lms/academic/teacher/lab-tasks/${labTaskId}/marks/${studentId}`, body),
   gradeLabSubmission: (submissionId, body) => put(`/lms/academic/teacher/lab-submissions/${submissionId}/grade`, body),
-  // Student exports (Excel / PDF) — params is a query string e.g. "?section=A"
+  // Student exports (Excel / PDF) — params is a query string e.g. "?search=ali"
   exportStudentsExcel: (offeringId, params = '', filename = 'students.xlsx') => download(`/lms/academic/teacher/offerings/${offeringId}/students/export/excel${params}`, filename),
   exportStudentsPdf: (offeringId, params = '', filename = 'students.pdf') => download(`/lms/academic/teacher/offerings/${offeringId}/students/export/pdf${params}`, filename),
   exportAllStudentsExcel: (params = '', filename = 'all-students.xlsx') => download(`/lms/academic/teacher/students/export/excel${params}`, filename),
@@ -343,13 +340,8 @@ const coordinator = {
   planning: (programId) => get(`/lms/academic/coordinator/planning${programId ? `?programId=${programId}` : ''}`),
   curriculum: () => get('/lms/academic/coordinator/curriculum'),
   allocation: (termId) => get(`/lms/academic/coordinator/allocation${termId ? `?termId=${termId}` : ''}`),
-  // Unified semester-wise Student Allocation & Section Management
+  // Semester-wise Student Allocation (Program → Batch → Semester; no Sections)
   semesterAllocation: (params = '') => get(`/lms/academic/coordinator/semester-allocation${params}`),
-  autoAllocateSemester: (body) => post('/lms/academic/coordinator/semester-allocation/auto', body),
-  // Section management (roster / auto-create / drag&drop transfer)
-  offeringRoster: (offeringId) => get(`/lms/academic/coordinator/offerings/${offeringId}/roster`),
-  autoCreateSections: (offeringId, capacity) => post(`/lms/academic/coordinator/offerings/${offeringId}/sections/auto`, { capacity }),
-  transferStudentSection: (registrationId, sectionId) => put(`/lms/academic/coordinator/registrations/${registrationId}/section`, { sectionId }),
   // Weekly schedule / timetable
   schedule: (termId) => get(`/lms/academic/coordinator/schedule${termId ? `?termId=${termId}` : ''}`),
   scheduleClashCheck: (body) => post('/lms/academic/coordinator/schedule/clash-check', body),
@@ -447,7 +439,6 @@ const coordinator = {
   deleteCourse: (id) => del(`/lms/academic/courses/${id}`),
   createOffering: (body) => post('/lms/academic/offerings', body),
   updateOffering: (id, body) => put(`/lms/academic/offerings/${id}`, body),
-  createSection: (offeringId, body) => post(`/lms/academic/offerings/${offeringId}/sections`, body),
 
   // ========================================================
   // PHASE 5 — COORDINATOR PLUS (real-data modules)
@@ -472,7 +463,6 @@ const coordinator = {
   studentsFilters: () => get('/lms/academic/coordinator/students-filters'),
   studentsCounts: (params = '') => get(`/lms/academic/coordinator/students-counts${params}`),
   studentProfile: (id) => get(`/lms/academic/coordinator/students/${id}/profile`),
-  transferStudent: (id, body) => put(`/lms/academic/coordinator/students/${id}/transfer`, body),
 
   // ---- Enrollment ----
   enrollmentRequests: (params = '') => get(`/lms/academic/coordinator/enrollment/requests${params}`),
