@@ -163,7 +163,7 @@ async function resolveCoordinatorInstructorIds(lmsUser) {
 
 /**
  * DEPARTMENT ISOLATION guard: a Course Coordinator may only create/edit/delete
- * a schedule slot / roster / section / assignment for a course offering that
+ * a schedule slot / roster / assignment for a course offering that
  * belongs to THEIR OWN department. Governance roles are unrestricted.
  */
 async function assertOfferingInScope(lmsUser, offeringId) {
@@ -264,10 +264,9 @@ router.get('/dashboard', COORD_OR_GOV, asyncHandler(async (req, res) => {
   const teachW  = isGov ? {} : { id: { in: scopedTeacherIds.length ? scopedTeacherIds : ['__none__'] } };
   const studIdW = isGov ? {} : { id: { in: scopedStudentIds.length ? scopedStudentIds : ['__none__'] } };
   const regByOffW = isGov ? {} : { offeringId: { in: scopedOfferingIds.length ? scopedOfferingIds : [-1] } };
-  const sectByOffW = isGov ? {} : { offeringId: { in: scopedOfferingIds.length ? scopedOfferingIds : [-1] } };
 
   const [
-    totalPrograms, totalCourses, totalOfferings, totalSections,
+    totalPrograms, totalCourses, totalOfferings,
     totalTeachers, totalStudents, totalRegistrations,
     pendingApprovals, openEscalations,
     draftResults, publishedResults,
@@ -282,7 +281,6 @@ router.get('/dashboard', COORD_OR_GOV, asyncHandler(async (req, res) => {
     prisma.lmsProgram.count({ where: { isDeleted: false, ...progW } }),
     prisma.lmsCourse.count({ where: { isDeleted: false, ...courseW } }),
     prisma.courseOffering.count({ where: { isDeleted: false, termId, ...offW } }),
-    prisma.section.count({ where: { isDeleted: false, ...sectByOffW } }),
     prisma.lmsUser.count({ where: { role: 'Teacher', isActive: true, ...teachW } }),
     prisma.lmsUser.count({ where: { role: 'Student', isActive: true, ...studIdW } }),
     prisma.courseRegistration.count({ where: { status: 'ENROLLED', ...regByOffW } }),
@@ -369,7 +367,7 @@ router.get('/dashboard', COORD_OR_GOV, asyncHandler(async (req, res) => {
   res.json({
     term: term || null,
     stats: {
-      totalPrograms, totalCourses, totalOfferings, totalSections,
+      totalPrograms, totalCourses, totalOfferings,
       totalTeachers, totalStudents, totalRegistrations,
       pendingApprovals, openEscalations,
       draftResults, publishedResults,
@@ -573,7 +571,6 @@ router.get('/allocation', COORD_OR_GOV, asyncHandler(async (req, res) => {
     include: {
       course: { include: { program: true, semester: true } },
       teacher: { select: { id: true, username: true } },
-      sections: { where: { isDeleted: false }, include: { _count: { select: { registrations: true } } } },
       _count: { select: { registrations: true } },
     },
     orderBy: { id: 'asc' },
@@ -587,7 +584,6 @@ router.get('/allocation', COORD_OR_GOV, asyncHandler(async (req, res) => {
       teacher: o.teacher ? o.teacher.username : null,
       status: o.status,
       students: o._count.registrations,
-      sections: o.sections.map((s) => ({ id: s.id, name: s.name, capacity: s.capacity, enrolled: s._count.registrations })),
       weights: { assignment: o.assignmentWeight, quiz: o.quizWeight, mid: o.midWeight, final: o.finalWeight },
     })),
   });
@@ -672,8 +668,6 @@ router.post('/teachers/replace', COORD, validate([
     : { teacherId: fromTeacherId, termId: term ? term.id : -1, isDeleted: false };
   const affected = await prisma.courseOffering.findMany({ where, select: { id: true } });
   await prisma.courseOffering.updateMany({ where, data: { teacherId: toTeacherId } });
-  // Also move sections that pointed at the old teacher.
-  await prisma.section.updateMany({ where: { teacherId: fromTeacherId, offeringId: { in: affected.map((a) => a.id) } }, data: { teacherId: toTeacherId } });
   await audit(req, 'TEACHER_REPLACE', 'CourseOffering', offeringId || 'bulk', { before: { fromTeacherId }, after: { toTeacherId, offerings: affected.map((a) => a.id) } });
   await notify(toTeacherId, { title: 'Courses reassigned to you', message: `${affected.length} course offering(s) have been reassigned to you.`, type: 'INFO' });
   await notify(fromTeacherId, { title: 'Courses reassigned', message: `${affected.length} of your offerings were reassigned.`, type: 'INFO' });
@@ -750,10 +744,10 @@ router.get('/workload', COORD_OR_GOV, asyncHandler(async (req, res) => {
 // ============================================================
 // COURSE DISTRIBUTION
 //  A "distribution" = a CourseOffering (course + session/term) with a
-//  teacher + section assignment. The UI uses cascading dropdowns:
+//  teacher assignment. The UI uses cascading dropdowns:
 //    Teacher · Program · Semester · Course (by semester) · Session(Term)
-//    · Section · (Assign Teacher)
-//  Create / Edit / Delete persist to CourseOffering + Section. Additive.
+//    · (Assign Teacher)
+//  Create / Edit / Delete persist to CourseOffering. Additive.
 // ============================================================
 
 // Dropdown source data for the distribution form.
@@ -858,7 +852,6 @@ router.get('/distribution', COORD_OR_GOV, asyncHandler(async (req, res) => {
       course: { include: { program: { select: { id: true, shortForm: true, name: true } }, semester: { select: { id: true, number: true } } } },
       teacher: { select: { id: true, username: true, profile: { select: { fullName: true } } } },
       term: { select: { id: true, code: true, title: true } },
-      sections: { where: { isDeleted: false }, select: { id: true, name: true, capacity: true, room: true, _count: { select: { registrations: true } } } },
       _count: { select: { registrations: true } },
     },
     orderBy: { id: 'asc' },
@@ -881,7 +874,6 @@ router.get('/distribution', COORD_OR_GOV, asyncHandler(async (req, res) => {
     sessionId: o.termId,
     status: o.status,
     students: o._count.registrations,
-    sections: o.sections.map((s) => ({ id: s.id, name: s.name, capacity: s.capacity, room: s.room, enrolled: s._count.registrations })),
   }));
 
   if (search) {
@@ -918,7 +910,7 @@ router.get('/distribution', COORD_OR_GOV, asyncHandler(async (req, res) => {
 //   1. find an existing course by code (within scope), or CREATE
 //      the course from the manually-entered code/title,
 //   2. create (or revive) the CourseOffering for (course, term),
-//   3. assign the teacher + create the section.
+//   3. assign the teacher.
 //
 // Response reports per-row success/failure so partial batches are
 // transparent rather than silently dropped.
@@ -1026,19 +1018,6 @@ router.post('/distribution/batch', COORD, validate([
         });
       }
 
-      // 4. Section.
-      const sectionName = String(r.sectionName || b.sectionName || 'A').trim() || 'A';
-      const dupe = await prisma.section.findFirst({ where: { offeringId: offering.id, name: sectionName } });
-      if (!dupe) {
-        await prisma.section.create({
-          data: {
-            offeringId: offering.id,
-            name: sectionName,
-            capacity: r.capacity ? parseInt(r.capacity, 10) : (b.capacity ? parseInt(b.capacity, 10) : 150),
-            teacherId: teacherId || null,
-          },
-        });
-      }
 
       if (teacherId) {
         await notify(teacherId, {
@@ -1077,7 +1056,7 @@ router.post('/distribution/batch', COORD, validate([
   });
 }));
 
-// Create a distribution: offering (course + session) + optional teacher + section.
+// Create a distribution: offering (course + session) + optional teacher.
 router.post('/distribution', COORD, validate([
   body('courseId').notEmpty().withMessage('Course is required'),
   body('sessionId').notEmpty().withMessage('Session is required'),
@@ -1120,21 +1099,6 @@ router.post('/distribution', COORD, validate([
     offering = await prisma.courseOffering.create({ data: { courseId, termId, teacherId, status: 'ACTIVE' } });
   }
 
-  // Optional section creation (name + capacity 150 default).
-  if (b.sectionName) {
-    const name = String(b.sectionName).trim();
-    const dupe = await prisma.section.findFirst({ where: { offeringId: offering.id, name } });
-    if (!dupe) {
-      await prisma.section.create({
-        data: {
-          offeringId: offering.id,
-          name,
-          capacity: b.capacity ? parseInt(b.capacity, 10) : 150,
-          teacherId: teacherId || null,
-        },
-      });
-    }
-  }
 
   if (teacherId) {
     await notify(teacherId, { title: 'Course assigned', message: `You have been assigned to ${course.code} — ${course.title} (${term.title}).`, type: 'INFO', link: `/teacher/offerings/${offering.id}` }).catch(() => {});
@@ -1147,7 +1111,6 @@ router.post('/distribution', COORD, validate([
 //   - Assigned Teacher (offering teacher)
 //   - Course Assignment (which course this offering points to)
 //   - Semester & Credit Hours (stored on the LmsCourse)
-//   - Section (name / capacity / room / section teacher)
 //   - Status (ACTIVE / COMPLETED / CANCELLED)
 // All updates persist immediately to the database.
 router.put('/distribution/:offeringId', COORD, asyncHandler(async (req, res) => {
@@ -1155,7 +1118,7 @@ router.put('/distribution/:offeringId', COORD, asyncHandler(async (req, res) => 
   const b = req.body || {};
   const before = await prisma.courseOffering.findFirst({
     where: { id: offeringId, isDeleted: false },
-    include: { course: true, sections: { where: { isDeleted: false }, orderBy: { id: 'asc' } } },
+    include: { course: true },
   });
   if (!before) throw httpError(404, 'Distribution not found');
 
@@ -1226,55 +1189,6 @@ router.put('/distribution/:offeringId', COORD, asyncHandler(async (req, res) => 
     await prisma.lmsCourse.update({ where: { id: targetCourseId }, data: courseData });
   }
 
-  // --- Section update: edit the primary section, or create one if requested ---
-  if (b.sectionName !== undefined || b.capacity !== undefined || b.room !== undefined || b.sectionTeacherId !== undefined) {
-    const sectionName = b.sectionName !== undefined && b.sectionName !== null && String(b.sectionName).trim()
-      ? String(b.sectionName).trim() : null;
-    const primary = before.sections[0] || null;
-
-    // Resolve section teacher (defaults to the offering teacher if provided).
-    let sectionTeacherId;
-    if (b.sectionTeacherId !== undefined) {
-      sectionTeacherId = b.sectionTeacherId || null;
-      if (sectionTeacherId) {
-        // Only own-department (or approved borrowed) instructors.
-        await assertTeacherAssignable(req.lmsUser, sectionTeacherId);
-        const st = await prisma.lmsUser.findFirst({ where: { id: sectionTeacherId, role: 'Teacher' } });
-        if (!st) throw httpError(400, 'Invalid section teacher');
-      }
-    }
-
-    const secData = {};
-    if (sectionName) secData.name = sectionName;
-    if (b.capacity !== undefined && b.capacity !== null && b.capacity !== '') {
-      const cap = parseInt(b.capacity, 10);
-      if (!Number.isNaN(cap) && cap > 0) secData.capacity = cap;
-    }
-    if (b.room !== undefined) secData.room = b.room ? String(b.room) : null;
-    if (sectionTeacherId !== undefined) secData.teacherId = sectionTeacherId;
-
-    if (primary) {
-      // Guard the unique (offeringId, name) constraint when renaming.
-      if (secData.name && secData.name !== primary.name) {
-        const dupe = await prisma.section.findFirst({ where: { offeringId, name: secData.name, isDeleted: false, id: { not: primary.id } } });
-        if (dupe) throw httpError(409, `A section named "${secData.name}" already exists for this distribution`);
-      }
-      if (Object.keys(secData).length) {
-        await prisma.section.update({ where: { id: primary.id }, data: secData });
-      }
-    } else if (sectionName) {
-      // No section yet — create one with the provided details.
-      await prisma.section.create({
-        data: {
-          offeringId,
-          name: sectionName,
-          capacity: secData.capacity || 150,
-          room: secData.room ?? null,
-          teacherId: secData.teacherId ?? (data.teacherId ?? before.teacherId) ?? null,
-        },
-      });
-    }
-  }
 
   // --- Notify newly assigned teacher ---
   if (data.teacherId && data.teacherId !== before.teacherId) {
@@ -1910,148 +1824,22 @@ router.get('/students', COORD_OR_GOV, asyncHandler(async (req, res) => {
 }));
 
 // ============================================================
-// SECTION MANAGEMENT — roster, auto-create, student transfer
-// (Default section capacity for the coordinator is 150 students.)
+// SECTION MANAGEMENT — REMOVED (LMS Enhancement B1.e).
+// The "Section" concept no longer exists in the LMS: students are
+// organised by Program → Batch → Semester only. The legacy endpoints
+// answer 410 Gone so stale clients fail loudly instead of silently
+// re-creating section data. (Historic DB rows are kept untouched.)
 // ============================================================
-const DEFAULT_SECTION_CAPACITY = 150;
-
-/* Roster for an offering: every enrolled student + which section they sit in.
-   Powers the drag-and-drop student transfer board. */
-router.get('/offerings/:offeringId/roster', COORD_OR_GOV, asyncHandler(async (req, res) => {
-  const offeringId = parseInt(req.params.offeringId, 10);
-  const offering = await prisma.courseOffering.findUnique({
-    where: { id: offeringId },
-    include: { course: { include: { program: true, semester: true } } },
-  });
-  if (!offering) throw httpError(404, 'Offering not found');
-  // DEPARTMENT ISOLATION: offering must belong to own department.
-  await assertOfferingInScope(req.lmsUser, offeringId);
-
-  const [sections, registrations] = await Promise.all([
-    prisma.section.findMany({
-      where: { offeringId, isDeleted: false },
-      include: { _count: { select: { registrations: true } } },
-      orderBy: { name: 'asc' },
-    }),
-    prisma.courseRegistration.findMany({
-      where: { offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } },
-      include: {
-        student: { select: { id: true, username: true, isActive: true, profile: { select: { fullName: true, rollNumber: true, session: true, program: true } } } },
-      },
-      orderBy: { id: 'asc' },
-    }),
-  ]);
-
-  res.json({
-    offering: {
-      id: offering.id,
-      course: { code: offering.course.code, title: offering.course.title, semester: offering.course.semester ? offering.course.semester.number : null, program: offering.course.program ? offering.course.program.shortForm : null },
-    },
-    sections: sections.map((s) => ({ id: s.id, name: s.name, capacity: s.capacity, room: s.room, enrolled: s._count.registrations })),
-    students: registrations.map((r) => ({
-      registrationId: r.id,
-      studentId: r.studentId,
-      sectionId: r.sectionId,
-      roll: r.student.username,
-      name: displayName(r.student),
-      isActive: r.student.isActive,
-      session: r.student.profile ? r.student.profile.session : null,
-      status: r.status,
-    })),
-  });
-}));
-
-/* Auto-create sections for an offering: split the enrolled students evenly
-   across N sections of the given capacity (default 150). Existing sections
-   are left intact; new sections are named after the last existing letter. */
-router.post('/offerings/:offeringId/sections/auto', COORD, asyncHandler(async (req, res) => {
-  const offeringId = parseInt(req.params.offeringId, 10);
-  const offering = await prisma.courseOffering.findUnique({ where: { id: offeringId } });
-  if (!offering) throw httpError(404, 'Offering not found');
-  // DEPARTMENT ISOLATION: offering must belong to own department.
-  await assertOfferingInScope(req.lmsUser, offeringId);
-
-  const capacity = req.body.capacity ? parseInt(req.body.capacity, 10) : DEFAULT_SECTION_CAPACITY;
-  if (!capacity || capacity < 1) throw httpError(400, 'Invalid capacity');
-
-  const [existing, regs] = await Promise.all([
-    prisma.section.findMany({ where: { offeringId, isDeleted: false }, orderBy: { name: 'asc' } }),
-    prisma.courseRegistration.findMany({ where: { offeringId, status: { in: ['ENROLLED', 'COMPLETED'] } }, orderBy: { id: 'asc' } }),
-  ]);
-
-  // How many sections do we need to seat everyone (at least 1)?
-  const needed = Math.max(1, Math.ceil(regs.length / capacity));
-  const toCreate = Math.max(0, needed - existing.length);
-  if (toCreate === 0) {
-    return res.json({ message: 'Enough sections already exist', created: 0, sections: existing });
-  }
-
-  // Next section letters (A, B, C…). Find the highest existing letter.
-  const usedNames = new Set(existing.map((s) => s.name.toUpperCase()));
-  const created = [];
-  let charCode = 65; // 'A'
-  for (let i = 0; i < toCreate; i++) {
-    // find next free letter
-    while (usedNames.has(String.fromCharCode(charCode))) charCode++;
-    const name = String.fromCharCode(charCode);
-    usedNames.add(name);
-    const sec = await prisma.section.create({
-      data: { offeringId, name, capacity, teacherId: offering.teacherId || null, room: null },
-    });
-    created.push(sec);
-    await audit(req, 'SECTION_CREATE', 'Section', sec.id, { after: sec });
-  }
-
-  // Distribute UNASSIGNED registrations round-robin across all sections.
-  const allSections = [...existing, ...created];
-  const unassigned = regs.filter((r) => !r.sectionId);
-  for (let i = 0; i < unassigned.length; i++) {
-    const target = allSections[i % allSections.length];
-    await prisma.courseRegistration.update({ where: { id: unassigned[i].id }, data: { sectionId: target.id } });
-  }
-  if (unassigned.length) await audit(req, 'SECTION_AUTO_ALLOCATE', 'CourseOffering', offeringId, { after: { distributed: unassigned.length, sections: allSections.length } });
-
-  res.status(201).json({ message: `Created ${created.length} section(s)`, created: created.length, distributed: unassigned.length, sections: allSections });
-}));
-
-/* Transfer a single student (registration) to another section of the SAME
-   offering. Enforces the target section capacity. Powers drag & drop. */
-router.put('/registrations/:id/section', COORD, validate([
-  body('sectionId').optional({ nullable: true }),
-]), asyncHandler(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const reg = await prisma.courseRegistration.findUnique({ where: { id } });
-  if (!reg) throw httpError(404, 'Registration not found');
-  // DEPARTMENT ISOLATION: registration's offering must belong to own department.
-  await assertOfferingInScope(req.lmsUser, reg.offeringId);
-
-  const rawTarget = req.body.sectionId;
-  const targetSectionId = rawTarget == null || rawTarget === '' ? null : parseInt(rawTarget, 10);
-
-  if (targetSectionId != null) {
-    const target = await prisma.section.findUnique({
-      where: { id: targetSectionId },
-      include: { _count: { select: { registrations: true } } },
-    });
-    if (!target || target.isDeleted) throw httpError(404, 'Target section not found');
-    if (target.offeringId !== reg.offeringId) throw httpError(400, 'Section belongs to a different offering');
-    // Capacity guard (skip if the student is already in this section)
-    if (reg.sectionId !== targetSectionId && target._count.registrations >= target.capacity) {
-      throw httpError(409, `Section ${target.name} is full (${target.capacity}/${target.capacity})`);
-    }
-  }
-
-  const before = { sectionId: reg.sectionId };
-  const updated = await prisma.courseRegistration.update({ where: { id }, data: { sectionId: targetSectionId } });
-  await audit(req, 'STUDENT_SECTION_TRANSFER', 'CourseRegistration', id, { before, after: { sectionId: targetSectionId } });
-  res.json({ registration: updated });
-}));
+const sectionsRemoved = (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS. Students are organised by program, batch and semester.' });
+router.get('/offerings/:offeringId/roster', COORD_OR_GOV, sectionsRemoved);
+router.post('/offerings/:offeringId/sections/auto', COORD, sectionsRemoved);
+router.put('/registrations/:id/section', COORD, sectionsRemoved);
 
 // ============================================================
 // WEEKLY SCHEDULE / TIMETABLE
 //   • Full timetable view (all offerings of current term)
 //   • Create / edit (drag&drop move) / delete slots
-//   • Clash detection: teacher, room, and section/offering conflicts
+//   • Clash detection: teacher, room, and offering conflicts
 //   • Auto timetable generator (clash-free)
 // ============================================================
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -2093,9 +1881,9 @@ async function detectSlotClashes({ termId, offeringId, dayOfWeek, startTime, end
     if (room && s.room && room.toLowerCase() === s.room.toLowerCase()) {
       clashes.push({ type: 'ROOM', slotId: s.id, message: `Room "${room}" is occupied by ${s.offering.course.code} at ${s.startTime}-${s.endTime}` });
     }
-    // Same-offering clash (a section/offering cannot be in two places at once)
+    // Same-offering clash (an offering cannot be in two places at once)
     if (s.offeringId === offeringId) {
-      clashes.push({ type: 'SECTION', slotId: s.id, message: `${candidateOffering ? '' : ''}This offering already has a class at ${s.startTime}-${s.endTime}` });
+      clashes.push({ type: 'OFFERING', slotId: s.id, message: `${candidateOffering ? '' : ''}This offering already has a class at ${s.startTime}-${s.endTime}` });
     }
   }
   return clashes;
@@ -2471,7 +2259,6 @@ router.get('/live-classes/offerings', COORD, asyncHandler(async (req, res) => {
     where: { isDeleted: false, termId, ...offW },
     include: {
       course: { include: { semester: true } },
-      sections: true,
       teacher: { select: { id: true, username: true, profile: { select: { fullName: true } } } },
     },
     orderBy: { id: 'asc' },
@@ -2481,7 +2268,6 @@ router.get('/live-classes/offerings', COORD, asyncHandler(async (req, res) => {
       id: o.id,
       courseCode: o.course ? o.course.code : '',
       courseTitle: o.course ? o.course.title : '',
-      section: (o.sections && o.sections.length) ? o.sections.map((s) => s.name).join(', ') : null,
       semester: o.course && o.course.semester ? o.course.semester.number : null,
       teacherId: o.teacherId,
       teacher: o.teacher ? (o.teacher.profile?.fullName || o.teacher.username) : 'Unassigned',
@@ -2610,8 +2396,8 @@ router.delete('/live-classes/:id', COORD, asyncHandler(async (req, res) => {
 //  Add / Edit / Delete / View instructor (Teacher) profiles.
 //  Personal info is stored in LmsStudentProfile (reused as a
 //  generic staff-profile store, keyed on the unique lmsUserId).
-//  Assigned subjects / sections / courses are derived live from
-//  CourseOffering + Section. Additive coordinator endpoints — no
+//  Assigned subjects / courses are derived live from
+//  CourseOffering. Additive coordinator endpoints — no
 //  other role's behaviour is changed.
 // ============================================================
 
@@ -2679,23 +2465,22 @@ router.get('/instructors', COORD_OR_GOV, asyncHandler(async (req, res) => {
     orderBy: { username: 'asc' },
   });
 
-  // Live workload — offerings, students, sections per teacher (current term).
+  // Live workload — offerings and students per teacher (current term).
   const offs = await prisma.courseOffering.findMany({
     where: { isDeleted: false, termId, teacherId: { not: null } },
-    select: { teacherId: true, _count: { select: { registrations: true, sections: true } } },
+    select: { teacherId: true, _count: { select: { registrations: true } } },
   });
   const offMap = {};
   offs.forEach((o) => {
-    const m = offMap[o.teacherId] || { offerings: 0, students: 0, sections: 0 };
+    const m = offMap[o.teacherId] || { offerings: 0, students: 0 };
     m.offerings += 1;
     m.students += o._count.registrations;
-    m.sections += o._count.sections;
     offMap[o.teacherId] = m;
   });
 
   let rows = teachers.map((t) => {
     const pi = instructorPersonalInfo(t.profile);
-    const w = offMap[t.id] || { offerings: 0, students: 0, sections: 0 };
+    const w = offMap[t.id] || { offerings: 0, students: 0 };
     return {
       id: t.id,
       username: t.username,
@@ -2709,7 +2494,6 @@ router.get('/instructors', COORD_OR_GOV, asyncHandler(async (req, res) => {
       lastLoginAt: t.lastLoginAt,
       createdAt: t.createdAt,
       offerings: w.offerings,
-      sections: w.sections,
       students: w.students,
     };
   });
@@ -2737,7 +2521,7 @@ router.get('/instructors', COORD_OR_GOV, asyncHandler(async (req, res) => {
   });
 }));
 
-// VIEW one instructor — full personal info + assigned subjects/sections/courses.
+// VIEW one instructor — full personal info + assigned subjects/courses.
 router.get('/instructors/:id', COORD_OR_GOV, asyncHandler(async (req, res) => {
   const id = req.params.id;
   const u = await prisma.lmsUser.findFirst({
@@ -2758,7 +2542,6 @@ router.get('/instructors/:id', COORD_OR_GOV, asyncHandler(async (req, res) => {
     where: { isDeleted: false, termId, teacherId: id },
     include: {
       course: { select: { code: true, title: true, creditHours: true } },
-      sections: { select: { id: true, name: true, capacity: true, room: true, _count: { select: { registrations: true } } } },
       _count: { select: { registrations: true } },
     },
     orderBy: { id: 'asc' },
@@ -2770,7 +2553,6 @@ router.get('/instructors/:id', COORD_OR_GOV, asyncHandler(async (req, res) => {
     courseTitle: o.course.title,
     creditHours: o.course.creditHours,
     students: o._count.registrations,
-    sections: o.sections.map((s) => ({ id: s.id, name: s.name, capacity: s.capacity, room: s.room, enrolled: s._count.registrations })),
   }));
 
   res.json({
@@ -2786,7 +2568,6 @@ router.get('/instructors/:id', COORD_OR_GOV, asyncHandler(async (req, res) => {
     assignments,
     workload: {
       offerings: assignments.length,
-      sections: assignments.reduce((a, c) => a + c.sections.length, 0),
       students: assignments.reduce((a, c) => a + c.students, 0),
       totalCredits: assignments.reduce((a, c) => a + (c.creditHours || 0), 0),
     },
@@ -2951,8 +2732,8 @@ router.post('/instructors/:id/photo', COORD, uploadPhoto.single('photo'), asyncH
 }));
 
 // DELETE an instructor. Default = soft delete (deactivate) so historical
-// records (offerings, sections, audit) stay intact. ?hard=true permanently
-// removes the account, first unassigning it from offerings/sections.
+// records (offerings, audit) stay intact. ?hard=true permanently
+// removes the account, first unassigning it from offerings.
 router.delete('/instructors/:id', COORD, asyncHandler(async (req, res) => {
   const id = req.params.id;
   const hard = String(req.query.hard || '') === 'true';
@@ -2970,7 +2751,7 @@ router.delete('/instructors/:id', COORD, asyncHandler(async (req, res) => {
     return res.json({ message: 'Instructor deactivated', mode: 'soft' });
   }
 
-  // Hard delete — unassign from offerings / sections to avoid orphan refs.
+  // Hard delete — unassign from offerings (and legacy section rows) to avoid orphan refs.
   await prisma.courseOffering.updateMany({ where: { teacherId: id }, data: { teacherId: null } });
   await prisma.section.updateMany({ where: { teacherId: id }, data: { teacherId: null } });
   await prisma.lmsUser.delete({ where: { id } }); // profile cascade-deletes
