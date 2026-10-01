@@ -199,7 +199,7 @@ router.get('/replacements', COORD_OR_GOV, asyncHandler(async (req, res) => {
   if (req.query.search) {
     const s = String(req.query.search).toLowerCase();
     rows = rows.filter((r) =>
-      [r.originalTeacherName, r.replacementTeacherName, r.courseLabel, r.sectionLabel, r.reason]
+      [r.originalTeacherName, r.replacementTeacherName, r.courseLabel, r.reason]
         .some((v) => (v || '').toLowerCase().includes(s)));
   }
 
@@ -212,7 +212,7 @@ router.post('/replacements', COORD, validate([
   body('replacementTeacherId').notEmpty(),
   body('reason').trim().notEmpty(),
 ]), asyncHandler(async (req, res) => {
-  const { originalTeacherId, replacementTeacherId, offeringId, sectionId, date, timeSlot, reason } = req.body;
+  const { originalTeacherId, replacementTeacherId, offeringId, date, timeSlot, reason } = req.body;
   if (originalTeacherId === replacementTeacherId) {
     throw httpError(400, 'Original and replacement teacher must be different.');
   }
@@ -240,17 +240,12 @@ router.post('/replacements', COORD, validate([
   const termId = term ? term.id : null;
 
   // Build denormalized labels for history display.
-  let courseLabel = null, sectionLabel = null, offId = null, secId = null;
+  let courseLabel = null, offId = null;
   if (offeringId) {
     offId = parseInt(offeringId, 10);
     const off = await prisma.courseOffering.findUnique({ where: { id: offId }, include: { course: { select: { code: true, title: true } } } });
     if (!off) throw httpError(400, 'Offering not found.');
     courseLabel = `${off.course.code} — ${off.course.title}`;
-  }
-  if (sectionId) {
-    secId = parseInt(sectionId, 10);
-    const sec = await prisma.section.findUnique({ where: { id: secId } });
-    if (sec) sectionLabel = sec.name;
   }
 
   // Duplicate guard — same pending request for same teacher/offering/date.
@@ -265,8 +260,8 @@ router.post('/replacements', COORD, validate([
   const rec = await prisma.teacherReplacement.create({
     data: {
       originalTeacherId, replacementTeacherId,
-      offeringId: offId, sectionId: secId,
-      courseLabel, sectionLabel,
+      offeringId: offId,
+      courseLabel,
       termLabel: term ? term.title : null,
       date: date || null, timeSlot: timeSlot || null,
       reason, status: 'PENDING',
@@ -300,7 +295,7 @@ router.put('/replacements/:id', COORD, asyncHandler(async (req, res) => {
   res.json({ replacement: rec });
 }));
 
-// Decide (approve / reject). On approval the offering/section teacher is updated.
+// Decide (approve / reject). On approval the offering teacher is updated.
 router.put('/replacements/:id/decide', COORD, validate([
   body('action').isIn(['approve', 'reject']),
 ]), asyncHandler(async (req, res) => {
@@ -313,9 +308,6 @@ router.put('/replacements/:id/decide', COORD, validate([
   let applied = false;
   if (action === 'approve' && rec.offeringId) {
     await prisma.courseOffering.update({ where: { id: rec.offeringId }, data: { teacherId: rec.replacementTeacherId } });
-    if (rec.sectionId) {
-      await prisma.section.update({ where: { id: rec.sectionId }, data: { teacherId: rec.replacementTeacherId } });
-    }
     applied = true;
     await notify(rec.replacementTeacherId, { title: 'Course assigned (replacement)', message: `You are now teaching ${rec.courseLabel || 'a course'}.`, type: 'INFO' });
     await notify(rec.originalTeacherId, { title: 'Replacement approved', message: `Your class ${rec.courseLabel || ''} has been reassigned.`, type: 'INFO' });
@@ -411,22 +403,15 @@ router.get('/students-list', COORD_OR_GOV, asyncHandler(async (req, res) => {
       select: {
         id: true, username: true, email: true, isActive: true, createdAt: true,
         profile: { select: STUDENT_PROFILE_SELECT },
-        registrations: { select: { id: true, status: true, sectionId: true, section: { select: { name: true } } } },
+        registrations: { select: { id: true, status: true } },
       },
     }),
     prisma.lmsUser.count({ where }),
   ]);
 
-  // Section filter (post-query because section lives on registrations).
-  if (req.query.section) {
-    const sec = String(req.query.section).toLowerCase();
-    items = items.filter((s) => (s.registrations || []).some((r) => (r.section?.name || '').toLowerCase() === sec));
-  }
-
   const rows = items.map((s) => {
     const p = s.profile || {};
     const enrolled = (s.registrations || []).filter((r) => r.status === 'ENROLLED').length;
-    const sections = [...new Set((s.registrations || []).map((r) => r.section?.name).filter(Boolean))];
     return {
       id: s.id,
       roll: p.rollNumber || s.username,
@@ -438,7 +423,6 @@ router.get('/students-list', COORD_OR_GOV, asyncHandler(async (req, res) => {
       programShort: p.programShortForm || null,
       batch: p.session || null,
       department: p.department || null,
-      section: sections.join(', ') || null,
       photoUrl: p.photoUrl || null,
       isActive: s.isActive,
       status: s.isActive ? (enrolled > 0 ? 'Enrolled' : 'Active') : 'Suspended',
@@ -449,27 +433,22 @@ router.get('/students-list', COORD_OR_GOV, asyncHandler(async (req, res) => {
   res.json(paginated(rows, total, q));
 }));
 
-// Filter option lists (programs, batches, sections) — all from DB.
+// Filter option lists (programs, batches) — all from DB.
 router.get('/students-filters', COORD_OR_GOV, asyncHandler(async (req, res) => {
   // DEPARTMENT ISOLATION: only surface filter options from the coordinator's
-  // own department (students + their offerings' sections).
+  // own department.
   const scope = await deptScope(req);
   const profileWhere = scope.unscoped
     ? {}
     : { lmsUserId: { in: scope.studentIds.length ? scope.studentIds : ['__none__'] } };
-  const sectionWhere = scope.unscoped
-    ? { isDeleted: false }
-    : { isDeleted: false, offeringId: { in: scope.offeringIds.length ? scope.offeringIds : [-1] } };
 
   const profiles = await prisma.lmsStudentProfile.findMany({
     where: profileWhere,
     select: { program: true, programShortForm: true, session: true },
   });
-  const sections = await prisma.section.findMany({ where: sectionWhere, select: { name: true } });
   const programs = [...new Set(profiles.map((p) => p.program).filter(Boolean))];
   const batches = [...new Set(profiles.map((p) => p.session).filter(Boolean))];
-  const sectionNames = [...new Set(sections.map((s) => s.name).filter(Boolean))];
-  res.json({ programs, batches, sections: sectionNames });
+  res.json({ programs, batches });
 }));
 
 // Status counts for the tabs.
@@ -515,15 +494,13 @@ router.get('/students/:id/profile', COORD_OR_GOV, asyncHandler(async (req, res) 
     where: { studentId: id },
     include: {
       offering: { include: { course: { select: { code: true, title: true, creditHours: true, semester: { select: { number: true, title: true } } } }, term: { select: { title: true } } } },
-      section: { select: { name: true } },
     },
     orderBy: { registeredAt: 'desc' },
   });
 
-  // Derive current section + semester from the most recent active enrollment.
+  // Derive the current semester from the most recent active enrollment.
   const activeReg =
     registrations.find((r) => r.status === 'ENROLLED') || registrations[0] || null;
-  const currentSection = activeReg?.section?.name || null;
   const currentSemester = activeReg?.offering?.course?.semester
     ? (activeReg.offering.course.semester.title || `Semester ${activeReg.offering.course.semester.number}`)
     : null;
@@ -564,7 +541,6 @@ router.get('/students/:id/profile', COORD_OR_GOV, asyncHandler(async (req, res) 
         batch: p.session || null,
         session: p.session || null,
         semester: currentSemester,
-        section: currentSection,
         enrollmentDate: p.enrollmentDate || null,
       },
       contact: {
@@ -580,7 +556,6 @@ router.get('/students/:id/profile', COORD_OR_GOV, asyncHandler(async (req, res) 
       course: r.offering?.course ? `${r.offering.course.code} — ${r.offering.course.title}` : '—',
       credits: r.offering?.course?.creditHours || 0,
       term: r.offering?.term?.title || null,
-      section: r.section?.name || null,
       type: r.registrationType,
       status: r.status,
       registeredAt: r.registeredAt,
@@ -599,33 +574,8 @@ router.get('/students/:id/profile', COORD_OR_GOV, asyncHandler(async (req, res) 
   });
 }));
 
-// Transfer a student between sections (capacity-validated + history).
-router.put('/students/:id/transfer', COORD, validate([
-  body('registrationId').notEmpty(),
-  body('toSectionId').notEmpty(),
-]), asyncHandler(async (req, res) => {
-  const { registrationId, toSectionId } = req.body;
-  const reg = await prisma.courseRegistration.findUnique({ where: { id: parseInt(registrationId, 10) }, include: { section: true } });
-  if (!reg || reg.studentId !== req.params.id) throw httpError(404, 'Registration not found for this student.');
-
-  // DEPARTMENT ISOLATION: the student + the offering being transferred within
-  // must both belong to the coordinator's own department.
-  const scope = await deptScope(req);
-  if (!scope.unscoped) {
-    if (!scope.studentIds.includes(reg.studentId)) throw httpError(403, 'This student belongs to another department.');
-    if (!scope.offeringIds.includes(reg.offeringId)) throw httpError(403, 'This course offering belongs to another department.');
-  }
-
-  const target = await prisma.section.findUnique({ where: { id: parseInt(toSectionId, 10) }, include: { _count: { select: { registrations: true } } } });
-  if (!target || target.isDeleted) throw httpError(400, 'Target section not found.');
-  if (target.offeringId !== reg.offeringId) throw httpError(400, 'Target section belongs to a different course.');
-  if (target._count.registrations >= target.capacity) throw httpError(400, `Target section is full (${target.capacity}).`);
-
-  const before = { sectionId: reg.sectionId, sectionName: reg.section?.name };
-  const updated = await prisma.courseRegistration.update({ where: { id: reg.id }, data: { sectionId: target.id } });
-  await audit(req, 'STUDENT_SECTION_TRANSFER', 'CourseRegistration', reg.id, { before, after: { sectionId: target.id, sectionName: target.name } });
-  res.json({ registration: updated, message: `Transferred to section ${target.name}` });
-}));
+// Section transfer — REMOVED (LMS Enhancement B1.e: no Sections in the LMS).
+router.put('/students/:id/transfer', COORD, (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS.' }));
 
 // ============================================================
 // 3. ENROLLMENT MODULE  (requests + approve/reject + statistics)
@@ -662,7 +612,6 @@ router.get('/enrollment/requests', COORD_OR_GOV, asyncHandler(async (req, res) =
             },
           },
         },
-        section: { select: { name: true } },
       },
       orderBy: { registeredAt: q.sortDir }, skip: q.skip, take: q.take,
     }),
@@ -683,7 +632,6 @@ router.get('/enrollment/requests', COORD_OR_GOV, asyncHandler(async (req, res) =
       semesterNumber: course?.semester?.number ?? null,
       semesterTitle: course?.semester?.title || (course?.semester?.number ? `Semester ${course.semester.number}` : null),
       course: course ? `${course.code} — ${course.title}` : '—',
-      section: r.section?.name || null,
       type: r.registrationType,
       status: r.status,
       registeredAt: r.registeredAt,
@@ -964,28 +912,14 @@ router.put('/messages-read/:userId', COORD_OR_GOV, asyncHandler(async (req, res)
 }));
 
 // ============================================================
-//  UNIFIED STUDENT ALLOCATION & SECTION MANAGEMENT
+//  STUDENT ALLOCATION (semester-wise, NO sections)
 //  ------------------------------------------------------------
-//  Sections are organised SEMESTER-WISE (not course-wise). For a
-//  program + semester, students enrolled that semester are grouped
-//  into sections of `SECTION_CAPACITY` (default 150). When a group
-//  exceeds the capacity, additional sections (A, B, C …) are created
-//  automatically and students are balanced across them.
-//
-//  The underlying schema keys Section by offeringId, so a semester
-//  "Section A" is materialised as an "A" section on EVERY course
-//  offering of that program+semester, and a student keeps the SAME
-//  section letter across all of their semester courses. This keeps
-//  the data model intact while presenting one unified, semester-wise
-//  allocation. 100% real DB data — no placeholders.
+//  LMS Enhancement B1.e removed the "Section" concept entirely.
+//  Students are organised by Program → Batch → Semester only. This
+//  read-only view groups the current term's enrolled students by
+//  program + semester (with their admission batch). 100% live DB data.
 // ============================================================
-const SECTION_CAPACITY = 150;
-const SECTION_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-
-// Build the live semester-wise allocation snapshot for the current term.
 async function buildSemesterAllocation(termId, filter = {}) {
-  // DEPARTMENT ISOLATION: when a scope is provided (non-governance coordinator),
-  // restrict the allocation snapshot to that department's course offerings.
   const scopeWhere = filter.offeringIds
     ? { id: { in: filter.offeringIds.length ? filter.offeringIds : [-1] } }
     : {};
@@ -993,17 +927,15 @@ async function buildSemesterAllocation(termId, filter = {}) {
     where: { isDeleted: false, termId, ...scopeWhere },
     include: {
       course: { include: { program: true, semester: true } },
-      sections: { where: { isDeleted: false }, orderBy: { name: 'asc' } },
       registrations: {
         where: { status: 'ENROLLED' },
-        include: { student: { select: { id: true, username: true, profile: { select: { fullName: true, rollNumber: true } } } } },
+        include: { student: { select: { id: true, username: true, profile: { select: { fullName: true, rollNumber: true, session: true } } } } },
       },
     },
     orderBy: { id: 'asc' },
   });
 
-  // Group offerings by program+semester.
-  const groups = new Map(); // key -> { programId, programName, semesterNumber, semesterId, offerings:[] }
+  const groups = new Map();
   for (const o of offerings) {
     const semNum = o.course?.semester?.number ?? null;
     const progId = o.course?.programId ?? null;
@@ -1027,43 +959,23 @@ async function buildSemesterAllocation(termId, filter = {}) {
 
   const result = [];
   for (const g of groups.values()) {
-    // Distinct students across all offerings in this program+semester.
-    const studentMap = new Map(); // studentId -> { id, name, roll, sectionName }
-    const sectionTally = new Map(); // sectionName -> count
+    const studentMap = new Map();
     for (const o of g.offerings) {
-      const secById = new Map(o.sections.map((s) => [s.id, s.name]));
       for (const r of o.registrations) {
-        const sName = r.sectionId ? secById.get(r.sectionId) || null : null;
-        if (!studentMap.has(r.studentId)) {
-          studentMap.set(r.studentId, {
-            id: r.studentId,
-            name: r.student.profile?.fullName || r.student.username,
-            roll: r.student.profile?.rollNumber || r.student.username,
-            sectionName: sName,
-          });
-        } else if (sName && !studentMap.get(r.studentId).sectionName) {
-          studentMap.get(r.studentId).sectionName = sName;
-        }
+        const cur = studentMap.get(r.studentId) || {
+          id: r.studentId,
+          name: r.student.profile?.fullName || r.student.username,
+          roll: r.student.profile?.rollNumber || r.student.username,
+          batch: r.student.profile?.session || null,
+          courses: 0,
+        };
+        cur.courses += 1;
+        studentMap.set(r.studentId, cur);
       }
     }
-    for (const s of studentMap.values()) {
-      if (s.sectionName) sectionTally.set(s.sectionName, (sectionTally.get(s.sectionName) || 0) + 1);
-    }
-
-    const students = [...studentMap.values()];
-    const totalStudents = students.length;
-    const requiredSections = Math.max(1, Math.ceil(totalStudents / SECTION_CAPACITY));
-    const unassigned = students.filter((s) => !s.sectionName).length;
-
-    // Distinct section letters that already exist across the semester offerings.
-    const existingLetters = new Set();
-    g.offerings.forEach((o) => o.sections.forEach((s) => existingLetters.add(s.name)));
-    const sectionList = [...existingLetters].sort().map((name) => ({
-      name,
-      capacity: SECTION_CAPACITY,
-      enrolled: sectionTally.get(name) || 0,
-    }));
-
+    const students = [...studentMap.values()].sort((x, y) => String(x.roll).localeCompare(String(y.roll)));
+    const batches = {};
+    students.forEach((st) => { const k = st.batch || 'Unknown'; batches[k] = (batches[k] || 0) + 1; });
     result.push({
       key: g.key,
       programId: g.programId,
@@ -1071,144 +983,32 @@ async function buildSemesterAllocation(termId, filter = {}) {
       programShortForm: g.programShortForm,
       semesterId: g.semesterId,
       semesterNumber: g.semesterNumber,
-      totalStudents,
-      unassigned,
-      capacity: SECTION_CAPACITY,
-      requiredSections,
-      sections: sectionList,
-      students,
+      totalStudents: students.length,
       offeringCount: g.offerings.length,
-      balanced: unassigned === 0 && sectionList.length >= requiredSections,
+      courses: g.offerings.map((o) => ({ offeringId: o.id, code: o.course.code, title: o.course.title, enrolled: o.registrations.length })),
+      batches: Object.entries(batches).map(([batch, count]) => ({ batch, count })).sort((x, y) => x.batch.localeCompare(y.batch)),
+      students,
     });
   }
-
   result.sort((a, b) => a.programShortForm.localeCompare(b.programShortForm) || a.semesterNumber - b.semesterNumber);
   return result;
 }
 
-// GET the unified semester-wise allocation view (real-time).
+// GET the semester-wise allocation view (real-time).
 router.get('/semester-allocation', COORD_OR_GOV, asyncHandler(async (req, res) => {
   const term = await currentTerm();
   const termId = term ? term.id : -1;
   const filter = {};
   if (req.query.programId) filter.programId = parseInt(req.query.programId, 10);
   if (req.query.semester) filter.semester = parseInt(req.query.semester, 10);
-  // DEPARTMENT ISOLATION: restrict allocation to this dept's offerings.
   const scope = await deptScope(req);
   if (!scope.unscoped) filter.offeringIds = scope.offeringIds;
   const groups = await buildSemesterAllocation(termId, filter);
-  res.json({
-    termId,
-    termLabel: term ? term.title : null,
-    capacity: SECTION_CAPACITY,
-    groups,
-  });
+  res.json({ termId, termLabel: term ? term.title : null, groups });
 }));
 
-// POST auto-allocate: create the needed sections (150 cap) for a program+
-// semester and balance students across them with a consistent letter on
-// every offering of that semester. Runs in real time, no manual steps.
-router.post('/semester-allocation/auto', COORD, asyncHandler(async (req, res) => {
-  const term = await currentTerm();
-  const termId = term ? term.id : -1;
-  const programId = req.body.programId ? parseInt(req.body.programId, 10) : null;
-  const semester = req.body.semester ? parseInt(req.body.semester, 10) : null;
-
-  const filter = {};
-  if (programId) filter.programId = programId;
-  if (semester) filter.semester = semester;
-
-  // DEPARTMENT ISOLATION: a coordinator can only auto-allocate within their
-  // own department's offerings.
-  const scope = await deptScope(req);
-  const scopeWhere = scope.unscoped
-    ? {}
-    : { id: { in: scope.offeringIds.length ? scope.offeringIds : [-1] } };
-
-  // Re-read offerings for the affected groups.
-  const offerings = await prisma.courseOffering.findMany({
-    where: { isDeleted: false, termId, ...scopeWhere },
-    include: {
-      course: { include: { program: true, semester: true } },
-      sections: { where: { isDeleted: false } },
-      registrations: { where: { status: 'ENROLLED' } },
-    },
-  });
-
-  const groups = new Map();
-  for (const o of offerings) {
-    const semNum = o.course?.semester?.number ?? null;
-    const progId = o.course?.programId ?? null;
-    if (semNum == null || progId == null) continue;
-    if (filter.programId && progId !== filter.programId) continue;
-    if (filter.semester && semNum !== filter.semester) continue;
-    const key = `${progId}::${semNum}`;
-    if (!groups.has(key)) groups.set(key, { progId, semNum, offerings: [] });
-    groups.get(key).offerings.push(o);
-  }
-
-  if (groups.size === 0) throw httpError(400, 'No course offerings found for the selected program/semester this term.');
-
-  let sectionsCreated = 0;
-  let studentsAssigned = 0;
-  const summaries = [];
-
-  for (const g of groups.values()) {
-    // Distinct students for this program+semester.
-    const studentIds = new Set();
-    g.offerings.forEach((o) => o.registrations.forEach((r) => studentIds.add(r.studentId)));
-    const students = [...studentIds].sort(); // deterministic order
-    const total = students.length;
-    const needed = Math.max(1, Math.ceil(total / SECTION_CAPACITY));
-    const letters = SECTION_LETTERS.slice(0, needed);
-
-    // Ensure each offering has a section for every needed letter.
-    const sectionIdByOfferingLetter = new Map(); // `${offeringId}:${letter}` -> sectionId
-    for (const o of g.offerings) {
-      const existing = new Map(o.sections.map((s) => [s.name, s]));
-      for (const letter of letters) {
-        if (existing.has(letter)) {
-          sectionIdByOfferingLetter.set(`${o.id}:${letter}`, existing.get(letter).id);
-        } else {
-          const created = await prisma.section.create({
-            data: { offeringId: o.id, name: letter, capacity: SECTION_CAPACITY },
-          });
-          sectionsCreated += 1;
-          sectionIdByOfferingLetter.set(`${o.id}:${letter}`, created.id);
-        }
-      }
-    }
-
-    // Balanced round-robin: assign each student a letter, same across offerings.
-    const letterForStudent = new Map();
-    students.forEach((sid, idx) => {
-      // Fill section A to capacity, then B, etc. (A=first 150, B=next 150…)
-      const letterIdx = Math.floor(idx / SECTION_CAPACITY);
-      letterForStudent.set(sid, letters[Math.min(letterIdx, letters.length - 1)]);
-    });
-
-    // Persist sectionId on every ENROLLED registration of this group.
-    for (const o of g.offerings) {
-      for (const r of o.registrations) {
-        const letter = letterForStudent.get(r.studentId);
-        if (!letter) continue;
-        const sectionId = sectionIdByOfferingLetter.get(`${o.id}:${letter}`);
-        if (sectionId && r.sectionId !== sectionId) {
-          await prisma.courseRegistration.update({ where: { id: r.id }, data: { sectionId } });
-          studentsAssigned += 1;
-        }
-      }
-    }
-
-    summaries.push({ programId: g.progId, semester: g.semNum, students: total, sections: needed });
-    await audit(req, 'SEMESTER_ALLOCATION_AUTO', 'CourseOffering', g.offerings[0]?.id || 0, {
-      after: { programId: g.progId, semester: g.semNum, students: total, sections: needed },
-    });
-  }
-
-  realtime.emitAll('allocation', { action: 'auto', summaries });
-  res.json({ message: 'Sections created and students allocated semester-wise.', sectionsCreated, studentsAssigned, summaries });
-}));
+// Section auto-allocation — REMOVED (B1.e).
+router.post('/semester-allocation/auto', COORD, (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS. Students are organised by program, batch and semester.' }));
 
 // ============================================================
 //  CROSS-DEPARTMENT INSTRUCTOR LOAN WORKFLOW  (Req 4)
