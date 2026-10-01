@@ -164,7 +164,7 @@ router.get('/dashboard', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
   const resScopeWhere = scope.unscoped ? {} : byOfferingWhere(scope);
 
   const [
-    totalPrograms, totalCourses, totalOfferings, totalSections,
+    totalPrograms, totalCourses, totalOfferings,
     totalTeachers, activeTeachers, totalStudents, activeStudents,
     totalRegistrations, withdrawnRegs, retakeRegs,
     pendingApprovals, openEscalations, criticalEscalations,
@@ -175,7 +175,6 @@ router.get('/dashboard', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     prisma.lmsProgram.count({ where: { isDeleted: false, ...programWhere(scope) } }),
     prisma.lmsCourse.count({ where: { isDeleted: false, ...courseWhere(scope) } }),
     prisma.courseOffering.count({ where: offWhere }),
-    prisma.section.count({ where: { isDeleted: false, ...(scope.unscoped ? {} : byOfferingWhere(scope)) } }),
     prisma.lmsUser.count({ where: { role: 'Teacher', ...teachGiven } }),
     prisma.lmsUser.count({ where: { role: 'Teacher', isActive: true, ...teachGiven } }),
     prisma.lmsUser.count({ where: { role: 'Student', ...studGiven } }),
@@ -245,7 +244,7 @@ router.get('/dashboard', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     term: term || null,
     scopedDepartment: scope.department || null,
     departmentKpis: {
-      totalPrograms, totalCourses, totalOfferings, totalSections,
+      totalPrograms, totalCourses, totalOfferings,
       avgAttendance, avgPassRate,
       activeOfferings: offerings.filter((o) => o.status === 'ACTIVE').length,
     },
@@ -352,7 +351,8 @@ router.get('/monitoring/academic', FOCAL_OR_GOV, asyncHandler(async (req, res) =
   });
 }));
 
-// Resource Monitoring — section/room capacity utilisation + materials.
+// Resource Monitoring — per-course enrolment + materials + live classes.
+// (Sections were removed from the LMS — B1.e — so utilisation is per course.)
 router.get('/monitoring/resources', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
   const term = await currentTerm();
   const termId = term ? term.id : -1;
@@ -360,37 +360,19 @@ router.get('/monitoring/resources', FOCAL_OR_GOV, asyncHandler(async (req, res) 
     where: { isDeleted: false, termId, ...offeringWhere(req.scope) },
     include: {
       course: { select: { code: true, title: true } },
-      sections: { where: { isDeleted: false }, include: { _count: { select: { registrations: true } } } },
       materials: { where: { isDeleted: false }, select: { id: true } },
       liveClasses: { select: { id: true } },
       _count: { select: { registrations: true } },
     },
   });
-  const rooms = {};
-  for (const o of offerings) {
-    for (const s of o.sections) {
-      const room = s.room || 'Unassigned';
-      if (!rooms[room]) rooms[room] = { room, sections: 0, capacity: 0, enrolled: 0 };
-      rooms[room].sections += 1;
-      rooms[room].capacity += s.capacity;
-      rooms[room].enrolled += s._count.registrations;
-    }
-  }
   res.json({
-    courses: offerings.map((o) => {
-      const cap = o.sections.reduce((a, s) => a + s.capacity, 0);
-      const enr = o.sections.reduce((a, s) => a + s._count.registrations, 0);
-      return {
-        offeringId: o.id,
-        course: `${o.course.code} — ${o.course.title}`,
-        sections: o.sections.length,
-        capacity: cap, enrolled: enr || o._count.registrations,
-        utilisation: cap ? Math.round(((enr || o._count.registrations) / cap) * 100) : 0,
-        materials: o.materials.length,
-        liveClasses: o.liveClasses.length,
-      };
-    }),
-    rooms: Object.values(rooms).map((r) => ({ ...r, utilisation: r.capacity ? Math.round((r.enrolled / r.capacity) * 100) : 0 })),
+    courses: offerings.map((o) => ({
+      offeringId: o.id,
+      course: `${o.course.code} — ${o.course.title}`,
+      enrolled: o._count.registrations,
+      materials: o.materials.length,
+      liveClasses: o.liveClasses.length,
+    })),
   });
 }));
 
@@ -689,7 +671,6 @@ router.get('/enrollments', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     include: {
       offering: { include: { course: { select: { code: true, title: true } } } },
       student: { select: { id: true, username: true, isActive: true, profile: { select: { fullName: true, session: true } } } },
-      section: { select: { name: true } },
     },
     orderBy: { registeredAt: 'desc' },
   });
@@ -697,7 +678,7 @@ router.get('/enrollments', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     enrollments: regs.map((r) => ({
       id: r.id, studentId: r.studentId, student: displayName(r.student), roll: r.student.username,
       course: `${r.offering.course.code} — ${r.offering.course.title}`, offeringId: r.offeringId,
-      section: r.section ? r.section.name : null, type: r.registrationType, status: r.status,
+      type: r.registrationType, status: r.status,
       session: r.student.profile ? r.student.profile.session : null, registeredAt: r.registeredAt,
     })),
   });
@@ -992,7 +973,6 @@ router.get('/student-search', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       registrations: {
         where: { status: { in: ['ENROLLED', 'COMPLETED'] } },
         select: {
-          section: { select: { name: true } },
           offering: {
             select: {
               term: { select: { id: true, code: true, title: true, isCurrent: true } },
@@ -1038,7 +1018,6 @@ router.get('/student-search', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     // "Session" is the running academic term; when there is no current-term
     // registration we fall back to the admission session so the filter is never empty.
     const sessionValue = sessionLabel || batch;
-    const section = s.registrations.find((r) => r.section) ? s.registrations.find((r) => r.section).section.name : '';
 
     if (p.program) programs.add(p.program);
     if (semesterLabel) semesters.add(semesterLabel);
@@ -1063,7 +1042,6 @@ router.get('/student-search', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       semesterNumber: currentSem ? currentSem.number : null,
       session: sessionValue,
       batch,
-      section,
       isActive: s.isActive,
       courses: s.registrations.length,
     };
@@ -1097,7 +1075,7 @@ router.get('/students/:id', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     where: { id, role: 'Student' },
     select: {
       id: true, username: true, isActive: true, lastLoginAt: true, createdAt: true, profile: true,
-      registrations: { include: { offering: { include: { course: { select: { code: true, title: true, creditHours: true } }, term: { select: { title: true } }, teacher: { select: { username: true, profile: { select: { fullName: true } } } } } }, section: { select: { name: true } } } },
+      registrations: { include: { offering: { include: { course: { select: { code: true, title: true, creditHours: true } }, term: { select: { title: true } }, teacher: { select: { username: true, profile: { select: { fullName: true } } } } } } } },
       courseResults: { include: { offering: { include: { course: { select: { code: true, title: true, creditHours: true } }, term: { select: { title: true } }, teacher: { select: { username: true, profile: { select: { fullName: true } } } } } } } },
       attendanceRecords: { select: { status: true } },
       assignmentSubmissions: { select: { status: true, marks: true, assignment: { select: { title: true, totalMarks: true, offering: { select: { teacher: { select: { username: true, profile: { select: { fullName: true } } } } } } } } } },
@@ -1173,7 +1151,7 @@ router.get('/students/:id', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       profile: student.profile, lastLoginAt: student.lastLoginAt, createdAt: student.createdAt,
       enrollmentHistory: student.registrations.map((r) => ({
         id: r.id, course: `${r.offering.course.code} — ${r.offering.course.title}`,
-        section: r.section ? r.section.name : null, term: r.offering.term ? r.offering.term.title : null,
+        term: r.offering.term ? r.offering.term.title : null,
         status: r.status, type: r.registrationType, registeredAt: r.registeredAt,
       })),
       registrations: student.registrations.map((r) => ({ id: r.id, course: `${r.offering.course.code} — ${r.offering.course.title}`, status: r.status, type: r.registrationType, teacher: teacherName(r.offering) })),
@@ -1457,7 +1435,6 @@ router.get('/assessment-monitor', FOCAL_OR_GOV, asyncHandler(async (req, res) =>
       where: { offeringId: { in: allOfferingIds }, status: { in: ['ENROLLED', 'COMPLETED'] } },
       select: {
         id: true, offeringId: true, studentId: true, status: true,
-        section: { select: { name: true } },
         student: {
           select: {
             id: true, username: true, email: true, isActive: true,
@@ -1580,7 +1557,6 @@ router.get('/assessment-monitor', FOCAL_OR_GOV, asyncHandler(async (req, res) =>
           semesterNumber: meta.semesterNumber,
           session: sessionLabel,
           batch: studentBatch,
-          section: r.section ? r.section.name : '',
           studentId: r.studentId,
           name: p.fullName || r.student.username,
           roll: p.rollNumber || r.student.username,
@@ -1915,8 +1891,8 @@ router.get('/reports/:kind', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
 //  ------------------------------------------------------------
 //  A single, professional, fully real-time reporting engine with
 //  tabs: enrollment · attendance · assignment · quizzes · midterm ·
-//  semester · course · section · program · performance.
-//  Every tab supports Program / Semester / Section filtering.
+//  semester · course · program · performance.
+//  Every tab supports Program / Semester filtering.
 //  Real teacher names are always returned (profile.fullName).
 //  No dummy data — 100% DB-backed.
 // ============================================================
@@ -1927,14 +1903,13 @@ function offTeacherName(off) {
 }
 
 // Build the canonical "registration row" dataset for the focal's scope,
-// enriched with program / semester / section / teacher so every report
+// enriched with program / semester / teacher so every report
 // tab can filter consistently. Returns an array of plain rows.
 async function buildRegistrationRows(scope) {
   const where = { ...byOfferingWhere(scope) };
   const regs = await prisma.courseRegistration.findMany({
     where,
     include: {
-      section: { select: { name: true } },
       student: { select: { id: true, username: true, profile: { select: { fullName: true, programShortForm: true, program: true, department: true } } } },
       offering: {
         include: {
@@ -1955,7 +1930,6 @@ async function buildRegistrationRows(scope) {
     programTitle: r.offering.course.program ? r.offering.course.program.name : (r.student.profile ? r.student.profile.program : null),
     semester: r.offering.course.semester ? r.offering.course.semester.number : null,
     semesterTitle: r.offering.course.semester ? r.offering.course.semester.title : null,
-    section: r.section ? r.section.name : null,
     courseCode: r.offering.course.code,
     courseTitle: r.offering.course.title,
     creditHours: r.offering.course.creditHours,
@@ -1967,12 +1941,11 @@ async function buildRegistrationRows(scope) {
   }));
 }
 
-// Apply Program / Semester / Section filters to a row set.
+// Apply Program / Semester filters to a row set.
 function applyReportFilters(rows, query) {
   return rows.filter((r) => {
     if (query.program && query.program !== 'all' && String(r.program) !== String(query.program)) return false;
     if (query.semester && query.semester !== 'all' && String(r.semester) !== String(query.semester)) return false;
-    if (query.section && query.section !== 'all' && String(r.section) !== String(query.section)) return false;
     return true;
   });
 }
@@ -1981,16 +1954,15 @@ function applyReportFilters(rows, query) {
 function buildFilterOptions(rows) {
   const programs = [...new Set(rows.map((r) => r.program).filter(Boolean))].sort();
   const semesters = [...new Set(rows.map((r) => r.semester).filter((v) => v != null))].sort((a, b) => a - b);
-  const sections = [...new Set(rows.map((r) => r.section).filter(Boolean))].sort();
-  return { programs, semesters, sections };
+  return { programs, semesters };
 }
 
 router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
   const tab = String(req.params.tab || '').toLowerCase();
   const scope = req.scope;
-  const q = { program: req.query.program, semester: req.query.semester, section: req.query.section };
+  const q = { program: req.query.program, semester: req.query.semester };
 
-  // The registration backbone (used by enrollment/section/program/semester/course).
+  // The registration backbone (used by enrollment/program/semester/course).
   const allRows = await buildRegistrationRows(scope);
   const filterOptions = buildFilterOptions(allRows);
   const rows = applyReportFilters(allRows, q);
@@ -2003,7 +1975,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       tab, filterOptions,
       rows: rows.map((r) => ({
         roll: r.roll, student: r.studentName, program: r.program, semester: r.semester,
-        section: r.section, course: `${r.courseCode} — ${r.courseTitle}`, teacher: r.teacher,
+        course: `${r.courseCode} — ${r.courseTitle}`, teacher: r.teacher,
         status: r.status, term: r.term, registeredAt: r.registeredAt,
       })),
       summary: {
@@ -2037,7 +2009,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       const a = agg[key(r.studentId, r.offeringId)] || { present: 0, total: 0 };
       const pct = a.total ? Math.round((a.present / a.total) * 1000) / 10 : 0;
       return {
-        roll: r.roll, student: r.studentName, program: r.program, semester: r.semester, section: r.section,
+        roll: r.roll, student: r.studentName, program: r.program, semester: r.semester,
         course: `${r.courseCode} — ${r.courseTitle}`, teacher: r.teacher,
         present: a.present, total: a.total, attendancePct: pct,
       };
@@ -2065,7 +2037,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       const meta = offMeta[s.assignment.offeringId] || {};
       return {
         roll: s.student.username, student: displayName(s.student),
-        program: meta.program, semester: meta.semester, section: meta.section,
+        program: meta.program, semester: meta.semester,
         course: meta.courseCode ? `${meta.courseCode} — ${meta.courseTitle}` : null,
         teacher: meta.teacher || 'Unassigned',
         title: s.assignment.title, status: s.status,
@@ -2101,7 +2073,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       const meta = offMeta[a.quiz.offeringId] || {};
       return {
         roll: a.student.username, student: displayName(a.student),
-        program: meta.program, semester: meta.semester, section: meta.section,
+        program: meta.program, semester: meta.semester,
         course: meta.courseCode ? `${meta.courseCode} — ${meta.courseTitle}` : null,
         teacher: meta.teacher || 'Unassigned',
         title: a.quiz.title, status: a.status,
@@ -2136,7 +2108,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       const meta = offMeta[r.offeringId] || {};
       return {
         roll: r.student.username, student: displayName(r.student),
-        program: meta.program, semester: meta.semester, section: meta.section,
+        program: meta.program, semester: meta.semester,
         course: meta.courseCode ? `${meta.courseCode} — ${meta.courseTitle}` : null,
         teacher: meta.teacher || 'Unassigned',
         marks: r.midMarks, total: r.midMax, grade: r.letterGrade,
@@ -2202,38 +2174,20 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     return res.json({ tab, filterOptions, rows: out, summary: { courses: out.length } });
   }
 
-  // ---------- SECTION (section-wise) ----------
-  if (tab === 'section') {
-    const bySec = {};
-    for (const r of rows) {
-      const sec = r.section || 'N/A';
-      if (!bySec[sec]) bySec[sec] = { section: sec, students: new Set(), courses: new Set(), programs: new Set(), enrolled: 0 };
-      const g = bySec[sec];
-      g.students.add(r.studentId); g.courses.add(r.courseCode);
-      if (r.program) g.programs.add(r.program);
-      if (r.status === 'ENROLLED') g.enrolled += 1;
-    }
-    const out = Object.values(bySec).map((g) => ({
-      section: g.section, students: g.students.size, courses: g.courses.size,
-      programs: [...g.programs].join(', '), enrolledRegistrations: g.enrolled,
-    })).sort((a, b) => (a.section > b.section ? 1 : -1));
-    return res.json({ tab, filterOptions, rows: out, summary: { sections: out.length } });
-  }
 
   // ---------- PROGRAM (program-wise) ----------
   if (tab === 'program') {
     const byProg = {};
     for (const r of rows) {
       const prog = r.program || 'N/A';
-      if (!byProg[prog]) byProg[prog] = { program: prog, programTitle: r.programTitle, students: new Set(), courses: new Set(), sections: new Set(), enrolled: 0 };
+      if (!byProg[prog]) byProg[prog] = { program: prog, programTitle: r.programTitle, students: new Set(), courses: new Set(), enrolled: 0 };
       const g = byProg[prog];
       g.students.add(r.studentId); g.courses.add(r.courseCode);
-      if (r.section) g.sections.add(r.section);
       if (r.status === 'ENROLLED') g.enrolled += 1;
     }
     const out = Object.values(byProg).map((g) => ({
       program: g.program, programTitle: g.programTitle, students: g.students.size,
-      courses: g.courses.size, sections: g.sections.size, enrolledRegistrations: g.enrolled,
+      courses: g.courses.size, enrolledRegistrations: g.enrolled,
     })).sort((a, b) => (a.program > b.program ? 1 : -1));
     return res.json({ tab, filterOptions, rows: out, summary: { programs: out.length } });
   }
@@ -2250,7 +2204,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       sIds.length ? prisma.lmsStudentProfile.findMany({ where: { lmsUserId: { in: sIds } }, select: { lmsUserId: true, fullName: true, programShortForm: true } }) : [],
     ]);
     const profMap = {}; for (const p of profiles) profMap[p.lmsUserId] = p;
-    // Meta (section/semester/program) per student from rows.
+    // Meta (semester/program) per student from rows.
     const sMeta = {}; for (const r of rows) if (!sMeta[r.studentId]) sMeta[r.studentId] = r;
     const acc = {};
     const ensure = (sid) => (acc[sid] || (acc[sid] = { sumGp: 0, sumCh: 0, sumPct: 0, nRes: 0, midSum: 0, finSum: 0, present: 0, attTotal: 0, asgGraded: 0, asgTotal: 0, quizGraded: 0, quizTotal: 0 }));
@@ -2265,7 +2219,7 @@ router.get('/reports2/:tab', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
       const prof = profMap[sid] || {};
       return {
         roll: meta.roll, student: prof.fullName || meta.studentName,
-        program: meta.program || prof.programShortForm, semester: meta.semester, section: meta.section,
+        program: meta.program || prof.programShortForm, semester: meta.semester,
         cgpa: a.sumCh ? Math.round((a.sumGp / a.sumCh) * 100) / 100 : 0,
         gpa: a.sumCh ? Math.round((a.sumGp / a.sumCh) * 100) / 100 : 0,
         avgPercent: a.nRes ? Math.round((a.sumPct / a.nRes) * 10) / 10 : 0,
