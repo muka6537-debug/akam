@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BookOpen, FileText, FileQuestion, Award, CalendarCheck, GraduationCap,
-  Megaphone, Radio, Clock, User, Wallet, Bell, CheckCircle2,
+  Megaphone, Radio, Clock, Wallet, Bell, CheckCircle2,
   TrendingUp, Layers, Activity as ActivityIcon, FlaskConical,
 } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
