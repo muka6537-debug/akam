@@ -8,7 +8,7 @@
 //    - bulk notification (system announcement to a selected group)
 //    - force-logout a session (records an invalidation marker)
 //    - transfer responsibilities/data from one staff member to another
-//      (reassigns LMS taught offerings + sections with zero data loss)
+//      (reassigns LMS taught offerings with zero data loss)
 //
 //  Every action → SaActivityLog. Nothing existing is modified.
 // ============================================================
@@ -115,7 +115,7 @@ async function forceLogout(req, res) {
 }
 
 // ---- Transfer responsibilities/data from one staff to another -----------
-// Reassigns all LMS taught offerings + sections from `fromId` to `toId`
+// Reassigns all LMS taught offerings from `fromId` to `toId`
 // with zero data loss (attendance/results/material stay on the offering;
 // only the teacherId pointer changes). Records a permanent audit trail.
 async function transferResponsibilities(req, res) {
@@ -131,11 +131,10 @@ async function transferResponsibilities(req, res) {
     if (!from || !to) return res.status(404).json({ error: 'One or both LMS users not found' });
 
     const off = await prisma.courseOffering.updateMany({ where: { teacherId: fromId }, data: { teacherId: toId } });
-    const sec = await prisma.section.updateMany({ where: { teacherId: fromId }, data: { teacherId: toId } });
 
-    await logLmsAudit({ req, action: 'RESPONSIBILITY_TRANSFER', entity: 'LmsUser', entityId: fromId, before: { teacher: from.username }, after: { teacher: to.username, offerings: off.count, sections: sec.count }, actorRole: 'CourseCoordinator' });
-    await logSaActivity({ req, module: 'users', action: 'transfer_responsibilities', description: `Transferred ${off.count} offerings + ${sec.count} sections from ${from.username} → ${to.username}. ${reason || ''}`.trim(), metadata: { fromId, toId, offerings: off.count, sections: sec.count } });
-    res.json({ success: true, offeringsMoved: off.count, sectionsMoved: sec.count });
+    await logLmsAudit({ req, action: 'RESPONSIBILITY_TRANSFER', entity: 'LmsUser', entityId: fromId, before: { teacher: from.username }, after: { teacher: to.username, offerings: off.count }, actorRole: 'CourseCoordinator' });
+    await logSaActivity({ req, module: 'users', action: 'transfer_responsibilities', description: `Transferred ${off.count} offerings from ${from.username} → ${to.username}. ${reason || ''}`.trim(), metadata: { fromId, toId, offerings: off.count } });
+    res.json({ success: true, offeringsMoved: off.count, sectionsMoved: 0 }); // sectionsMoved kept for API compatibility (Sections removed — B1.e)
   } catch (e) {
     console.error('SA transferResponsibilities error:', e);
     res.status(500).json({ error: 'Failed to transfer responsibilities' });

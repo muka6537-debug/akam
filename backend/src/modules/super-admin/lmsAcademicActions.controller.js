@@ -287,7 +287,9 @@ async function deleteMaterial(req, res) {
 //  SECTIONS — REMOVED (LMS Enhancement B1.e). Legacy endpoints → 410.
 // ==================================================================
 const sectionsGone = (req, res) => res.status(410).json({ error: 'Sections have been removed from the LMS.' });
-const listSections = sectionsGone;
+// List stays answerable (empty) so the Super-Admin panel (admissions app,
+// intentionally untouched) renders cleanly instead of erroring.
+const listSections = (req, res) => res.json({ sections: [], removed: true });
 const createSection = sectionsGone;
 const moveStudentSection = sectionsGone;
 
