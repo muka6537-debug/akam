@@ -1,13 +1,13 @@
 // ============================================================
 //  SUPER ADMIN — LMS GOVERNANCE CONTROLLER
 //  ------------------------------------------------------------
-//  Lets the Super Admin perform every FOCAL PERSON, EXAM CONTROLLER,
-//  PROVOST and QEC COORDINATOR action with the SAME effect as the
+//  Lets the Super Admin perform FOCAL PERSON, EXAM CONTROLLER,
+//  FINANCE and QEC COORDINATOR actions with the SAME effect as the
 //  original role — writing to the exact same LMS tables:
 //    - drop / restore students (LmsUser.isActive + CourseRegistration)
 //    - issue fines (LmsFeeChallan)  → appears in student account book
 //    - announce fees (LmsFeeAnnouncement → LmsFeeChallan per student)
-//    - approve / reject fee submissions (LmsFeeChallan.status)
+//    - confirm / waive fee challans (through the fee module)
 //    - block / unblock students (LmsStudentBlock)
 //    - exam attendance / UFM (ExamAttendance), recheck (RecheckRequest)
 //    - promotion / detention (CourseRegistration status)
@@ -136,7 +136,7 @@ async function issueFine(req, res) {
         studentId, challanNo: challanNo(), title,
         lineItems: JSON.stringify([{ label: title, amount: amt }]),
         totalAmount: amt, dueDate: dueDate || null, status: 'UNPAID',
-        feeType: 'OTHER', description: reason || null,
+        kind: 'FINE', feeType: 'OTHER', grossAmount: amt, description: reason || null,
         program: student.profile?.programShortForm || null,
         department: student.profile?.department || null,
       },
@@ -193,8 +193,8 @@ async function announceFee(req, res) {
         data: {
           studentId: s.id, challanNo: challanNo(), title,
           lineItems: JSON.stringify([{ label: title, amount: amt }]),
-          totalAmount: amt, dueDate: dueDate || null, status: 'UNPAID',
-          feeType, description: description || null,
+          grossAmount: amt, totalAmount: amt, dueDate: dueDate || null, status: 'UNPAID',
+          kind: 'NOTIFICATION', feeType, description: description || null,
           program: s.profile?.programShortForm || null,
           department: s.profile?.department || null,
           semester: semester != null ? Number(semester) : null,
@@ -213,30 +213,34 @@ async function announceFee(req, res) {
   }
 }
 
-// Approve / reject a fee challan submission (Provost effect).
+// Approve / reject / waive a fee challan (Finance effect). Approval goes
+// through the fee module's payment confirmation so a payment record and
+// audit entry always exist.
 async function reviewFeeChallan(req, res) {
   try {
     const id = parseInt(req.params.id, 10);
     const { action, reason } = req.body || {};
     const challan = await prisma.lmsFeeChallan.findUnique({ where: { id } });
     if (!challan) return res.status(404).json({ error: 'Challan not found' });
-
-    let status;
-    if (action === 'approve') status = 'PAID';
-    else if (action === 'reject') status = 'UNPAID';
-    else if (action === 'waive') status = 'WAIVED';
-    else return res.status(400).json({ error: 'action must be approve|reject|waive' });
-
-    if (action === 'reject' && (!reason || String(reason).trim().length < 3)) {
-      return res.status(400).json({ error: 'A rejection reason is required' });
+    if (!['approve', 'reject', 'waive'].includes(action)) return res.status(400).json({ error: 'action must be approve|reject|waive' });
+    if (action !== 'approve' && (!reason || String(reason).trim().length < 3)) {
+      return res.status(400).json({ error: 'A reason is required' });
     }
 
-    const updated = await prisma.lmsFeeChallan.update({
-      where: { id },
-      data: { status, paidAt: action === 'approve' ? new Date() : null },
-    });
-    await logLmsAudit({ req, action: `FEE_${action.toUpperCase()}`, entity: 'LmsFeeChallan', entityId: id, before: { status: challan.status }, after: { status }, actorRole: 'Provost' });
-    await logSaActivity({ req, module: 'lms', action: 'fee_review', description: `${action} fee challan #${id} → ${status}`, metadata: { challanId: id, action, reason: reason || null } });
+    let updated = challan;
+    if (action === 'approve') {
+      const { recordPayment } = require('../../services/feeBilling');
+      const r = await recordPayment({
+        req, challanId: id, method: 'BANK', channel: 'FINANCE',
+        reference: `SA-${Date.now().toString(36).toUpperCase()}-${id}`, note: `Confirmed by Super Admin ${req.user?.email || ''}`.trim(),
+      });
+      if (r.error) return res.status(r.status || 400).json({ error: r.error });
+      updated = r.challan;
+    } else if (action === 'waive') {
+      updated = await prisma.lmsFeeChallan.update({ where: { id }, data: { status: 'WAIVED' } });
+    }
+    await logLmsAudit({ req, action: `FEE_${action.toUpperCase()}`, entity: 'LmsFeeChallan', entityId: id, before: { status: challan.status }, after: { status: updated.status, reason: reason || null }, actorRole: 'SuperAdmin' });
+    await logSaActivity({ req, module: 'lms', action: 'fee_review', description: `${action} fee challan #${id} → ${updated.status}`, metadata: { challanId: id, action, reason: reason || null } });
     res.json({ success: true, challan: updated });
   } catch (e) {
     console.error('SA reviewFeeChallan error:', e);
@@ -333,6 +337,9 @@ async function setPromotion(req, res) {
     if (!student) return res.status(404).json({ error: 'Student not found' });
 
     if (decision === 'PROMOTE') {
+      const { holdStatus } = require('../../services/feeHolds');
+      const hold = await holdStatus(studentId);
+      if (hold.onHold) return res.status(402).json({ error: `Promotion is on Hold: the student has unpaid fee dues of Rs. ${hold.outstanding.toLocaleString('en-PK')}.`, promotion: 'HOLD' });
       await prisma.courseRegistration.updateMany({ where: { studentId, status: 'ENROLLED' }, data: { status: 'COMPLETED' } });
     }
     await logLmsAudit({ req, action: `STUDENT_${decision}`, entity: 'LmsUser', entityId: studentId, after: { decision, reason }, actorRole: 'ExamController' });

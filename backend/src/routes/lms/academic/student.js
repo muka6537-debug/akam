@@ -26,6 +26,10 @@ const { computeMissingDocs } = require('../../../utils/lmsProvision');
 const bbb = require('../../../utils/bbb');
 const aiTutor = require('../../../utils/aiGenerate');
 const { logActivity } = require('../../../utils/activityLog');
+const feeHolds = require('../../../services/feeHolds');
+const feeBilling = require('../../../services/feeBilling');
+const { admitCardPdf } = require('../../../services/feeExports');
+const { resolveStudent, resolveAdmissionFeeEntries } = require('../../../services/feeStudents');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const PDFDocument = require('pdfkit');
@@ -123,75 +127,6 @@ async function resolveStudentDeptScope(req) {
   return scope;
 }
 
-// ============================================================
-// ADMISSION-TIME FEE HISTORY (Requirement #2.3 — read-only)
-// ------------------------------------------------------------
-// Resolve the admission-time fees the student already paid during the
-// admissions process, so the LMS Account Book shows the COMPLETE fee
-// picture (application processing fee + admission/enrollment fee).
-//
-// STRICTLY READ-ONLY: reads admissions tables (Enrollment → User →
-// Application / FeePayment / AdmissionCycle) through the existing
-// Enrollment.lmsUserId link. It NEVER writes to the Admission System.
-//
-// Returns an array of synthetic challan-shaped entries (always PAID,
-// non-payable) that render seamlessly alongside LMS challans.
-async function resolveAdmissionFeeEntries(lmsUserId) {
-  const entries = [];
-  // Link LMS student → admissions Enrollment → admissions User.
-  const enrollment = await prisma.enrollment.findFirst({ where: { lmsUserId } }).catch(() => null);
-  if (!enrollment || !enrollment.userId) return entries;
-
-  // Latest application for this admissions user (carries the processing-fee
-  // flags and the linked FeePayment for the admission fee).
-  const application = await prisma.application.findFirst({
-    where: { userId: enrollment.userId },
-    orderBy: { submittedAt: 'desc' },
-    include: { feePayment: true, admissionCycle: true },
-  }).catch(() => null);
-  if (!application) return entries;
-
-  // 1. Application processing fee (paid at application time).
-  if (application.procFeePaid) {
-    const amount = application.admissionCycle ? Number(application.admissionCycle.applicationProcessingFee || 0) : 0;
-    entries.push({
-      id: `adm-proc-${application.id}`,
-      challanNo: application.procFeeTxnId || `APP-${application.id}`,
-      title: 'Application Processing Fee (Admission)',
-      lineItems: [{ label: 'Application processing fee', amount }],
-      totalAmount: amount,
-      dueDate: null,
-      status: 'PAID',
-      paidAt: application.procFeePaidAt || null,
-      paymentRef: application.procFeeTxnId || null,
-      createdAt: application.submittedAt || null,
-      source: 'admission',
-      readOnly: true,
-    });
-  }
-
-  // 2. Admission / enrollment fee (the FeePayment approved during admissions).
-  const fp = application.feePayment;
-  if (fp && (String(fp.status || '').toUpperCase() === 'APPROVED' || String(fp.status || '').toUpperCase() === 'PAID' || fp.paidAt)) {
-    const amount = Number(fp.amount || 0);
-    entries.push({
-      id: `adm-fee-${fp.id}`,
-      challanNo: fp.txnId || `ADM-${fp.id}`,
-      title: 'Admission Fee',
-      lineItems: [{ label: 'Admission / enrollment fee', amount }],
-      totalAmount: amount,
-      dueDate: null,
-      status: 'PAID',
-      paidAt: fp.paidAt || null,
-      paymentRef: fp.txnId || null,
-      createdAt: fp.createdAt || null,
-      source: 'admission',
-      readOnly: true,
-    });
-  }
-
-  return entries;
-}
 
 // ============================================================
 // REAL-TIME EVENT STREAM (SSE) — GET /student/events?token=<jwt>
@@ -569,6 +504,8 @@ async function autoEnrollFirstSemester(studentId, req) {
   if (!term) return { enrolled: 0, alreadyEnrolled: 0, missingOfferings: 0, reason: 'no-term' };
   const courseIds = await firstSemesterCourseIds(program.id);
   if (!courseIds.length) return { enrolled: 0, alreadyEnrolled: 0, missingOfferings: 0, reason: 'no-scheme' };
+  const hold = await feeHolds.holdStatus(studentId);
+  if (hold.onHold) return { enrolled: 0, alreadyEnrolled: 0, missingOfferings: 0, reason: 'fee-hold', message: hold.message };
 
   // Map first-semester courses to ACTIVE offerings in the current term.
   const offerings = await prisma.courseOffering.findMany({
@@ -2602,6 +2539,13 @@ router.post('/appeals', uploadLmsSubmission.single('file'), validate([
   }
 
   await audit(req, 'GRIEVANCE_CREATE', 'StudentAppeal', appeal.id, { after: { caseCode, caseType: validCaseType, category, priority, subject: appeal.subject, targetRole, targetUserId } });
+  if (category === 'ABSENCE_APPEAL') {
+    await feeBilling.raiseCharge({
+      req, studentId, kind: 'ABSENCE_APPEAL', headName: 'Absence Appeal Fee',
+      amount: feeBilling.CHARGE_RATES.ABSENCE_APPEAL, title: `Absence Appeal Fee — ${caseCode}`,
+      description: `Absence appeal "${appeal.subject}" (${caseCode}).`, dueInDays: 7,
+    });
+  }
   res.status(201).json({ appeal: shapeStudentCase(appeal) });
 }));
 
@@ -2797,80 +2741,58 @@ router.post('/surveys/:id/submit', validate([
 }));
 
 // ============================================================
-// FEES / ACCOUNT BOOK — challans + payment status
+// FEES — the fee account lives in the fee module
+// (/api/lms/academic/fees/me). This summary keeps the dashboard widget
+// and also lists the admission-time fees paid in the Admission System.
 // ============================================================
 router.get('/fees', asyncHandler(async (req, res) => {
   const studentId = req.lmsUser.id;
-  const challans = await prisma.lmsFeeChallan.findMany({
-    where: { studentId },
-    orderBy: { createdAt: 'desc' },
+  const [dues, admissionEntries] = await Promise.all([
+    feeBilling.studentDues(studentId),
+    resolveAdmissionFeeEntries(studentId).catch(() => []),
+  ]);
+  res.json({
+    challans: [...admissionEntries, ...dues.challans.map((c) => ({ ...c, source: 'lms' }))],
+    summary: { total: dues.summary.totalDue, paid: dues.summary.paid, outstanding: dues.summary.remaining },
   });
-
-  // Req #2.3 — the Account Book must ALSO show the admission-time application
-  // fee (paid during admissions) so the student sees their COMPLETE fee
-  // history. This is READ-ONLY: it reads admissions records via the
-  // Enrollment→User→Application link and NEVER writes to the Admission System.
-  // Rendered as a synthetic, already-PAID entry so it appears alongside LMS
-  // challans without a "Pay Now" action.
-  const admissionEntries = await resolveAdmissionFeeEntries(studentId).catch(() => []);
-
-  // Map DB challans to the response shape.
-  const challanEntries = challans.map((c) => ({
-    id: c.id, challanNo: c.challanNo, title: c.title,
-    lineItems: safeJson(c.lineItems, []), totalAmount: c.totalAmount,
-    dueDate: c.dueDate, status: c.status, paidAt: c.paidAt, paymentRef: c.paymentRef,
-    createdAt: c.createdAt, source: 'lms',
-  }));
-
-  // Admission fees first (oldest history), then LMS challans (newest first).
-  const allEntries = [...admissionEntries, ...challanEntries];
-
-  const summary = allEntries.reduce((acc, c) => {
-    acc.total += c.totalAmount;
-    if (c.status === 'PAID') acc.paid += c.totalAmount;
-    else if (c.status !== 'WAIVED') acc.outstanding += c.totalAmount;
-    return acc;
-  }, { total: 0, paid: 0, outstanding: 0 });
-
-  res.json({ challans: allEntries, summary });
 }));
 
-// PAY a fee challan directly from the Account Book (online payment).
-// Marks the challan PAID in real time so Provost & student records update
-// immediately. Additive — does not alter the existing /fees GET behaviour.
-router.post('/fees/:id/pay', asyncHandler(async (req, res) => {
+// Exam admit card — blocked while the student has unpaid (overdue) dues.
+router.get('/admit-card', asyncHandler(async (req, res) => {
   const studentId = req.lmsUser.id;
-  const id = parseInt(req.params.id, 10);
-  // Admission-time fees are read-only synthetic entries (non-numeric ids like
-  // "adm-proc-1") sourced from the Admission System — they are already paid and
-  // can never be paid/altered from the LMS.
-  if (!Number.isInteger(id)) throw httpError(400, 'This fee cannot be paid from the LMS.');
-  const challan = await prisma.lmsFeeChallan.findFirst({ where: { id, studentId } });
-  if (!challan) throw httpError(404, 'Fee challan not found');
-  if (challan.status === 'PAID') throw httpError(409, 'This fee has already been paid.');
+  const hold = await feeHolds.holdStatus(studentId);
+  const term = await prisma.academicTerm.findFirst({ where: { isCurrent: true } });
+  const regs = term ? await prisma.courseRegistration.findMany({
+    where: { studentId, status: 'ENROLLED', offering: { termId: term.id } },
+    include: { offering: { include: { course: { select: { code: true, title: true } } } } },
+  }) : [];
+  const courses = regs.map((r) => ({ offeringId: r.offeringId, code: r.offering.course.code, title: r.offering.course.title }));
+  res.json({ eligible: !hold.onHold && courses.length > 0, hold, term, courses });
+}));
 
-  const method = (req.body && req.body.method) ? String(req.body.method) : 'OneLink';
-  const paymentRef = `PAY-${Date.now().toString().slice(-8)}-${id}`;
-  const updated = await prisma.lmsFeeChallan.update({
-    where: { id },
-    data: { status: 'PAID', paidAt: new Date(), paymentRef },
+router.get('/admit-card/pdf', asyncHandler(async (req, res) => {
+  const studentId = req.lmsUser.id;
+  await feeHolds.assertNoDues(studentId, 'Admit card generation');
+  const term = await prisma.academicTerm.findFirst({ where: { isCurrent: true } });
+  const regs = term ? await prisma.courseRegistration.findMany({
+    where: { studentId, status: 'ENROLLED', offering: { termId: term.id } },
+    include: { offering: { include: { course: { select: { code: true, title: true } } } } },
+  }) : [];
+  if (!regs.length) throw httpError(409, 'You are not registered in any course this term.');
+  const schedules = await prisma.examSchedule.findMany({
+    where: { offeringId: { in: regs.map((r) => r.offeringId) }, isDeleted: false, status: { not: 'CANCELLED' } },
+    orderBy: { date: 'asc' },
   });
-
-  // Req #2.3 — reflect the paid/remaining status change in REAL TIME so the
-  // student's Account Book (and any live finance views) update immediately.
-  try {
-    realtime.emitTo([studentId], 'fee:paid', {
-      id: updated.id, challanNo: updated.challanNo, status: updated.status,
-      paidAt: updated.paidAt, paymentRef: updated.paymentRef,
-    });
-  } catch (_) { /* non-blocking */ }
-
-  res.json({
-    success: true,
-    challan: {
-      id: updated.id, challanNo: updated.challanNo, status: updated.status,
-      paidAt: updated.paidAt, paymentRef: updated.paymentRef, method,
-    },
+  const exams = {};
+  for (const e of schedules) {
+    exams[e.offeringId] = [exams[e.offeringId], `${e.examType} ${e.date}${e.startTime ? ` ${e.startTime}` : ''}${e.room ? ` · ${e.room}` : ''}`].filter(Boolean).join('\n');
+  }
+  await audit(req, 'ADMIT_CARD_ISSUE', 'LmsUser', studentId, { after: { term: term?.code, courses: regs.length } });
+  admitCardPdf(res, {
+    student: await resolveStudent(studentId),
+    term,
+    courses: regs.map((r) => ({ offeringId: r.offeringId, code: r.offering.course.code, title: r.offering.course.title })),
+    exams,
   });
 }));
 

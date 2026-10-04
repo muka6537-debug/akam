@@ -28,6 +28,7 @@ const {
 const { audit } = require('../../../utils/lmsAudit');
 const { notify, notifyMany } = require('../../../utils/lmsNotify');
 const { displayName, nameMap } = require('../../../utils/lmsWorkflow');
+const { recordPayment } = require('../../../services/feeBilling');
 const {
   resolveStudentPositions, generateChallansForAnnouncement, getActiveBlocks, studentMatchesScope,
 } = require('../../../utils/provostFinance');
@@ -50,7 +51,7 @@ async function currentTerm() {
 }
 
 // Map a fee-challan status → UI label.
-const CHALLAN_LABEL = { PAID: 'Approved', UNPAID: 'Pending', OVERDUE: 'Rejected', WAIVED: 'Waived' };
+const CHALLAN_LABEL = { PAID: 'Approved', UNPAID: 'Pending', PARTIAL: 'Pending', OVERDUE: 'Rejected', WAIVED: 'Waived' };
 
 function challanType(c) {
   // Derive a readable fee type from the title (best-effort, deterministic).
@@ -149,7 +150,7 @@ async function buildFeeApprovals() {
   const rollMap = Object.fromEntries(users.map((u) => [u.id, u.username]));
 
   return challans.map((c) => {
-    const overdue = c.status === 'UNPAID' && c.dueDate && new Date(c.dueDate) < new Date();
+    const overdue = (c.status === 'UNPAID' || c.status === 'PARTIAL') && c.dueDate && new Date(c.dueDate) < new Date();
     const status = overdue ? 'Rejected' : (CHALLAN_LABEL[c.status] || 'Pending');
     return {
       id: c.challanNo,
@@ -447,10 +448,18 @@ router.put('/fee-approvals/:id', PROVOST, validate([
   if (!challan) throw httpError(404, 'Fee record not found');
   const action = req.body.action;
   const before = { status: challan.status };
-  const data = action === 'approve'
-    ? { status: 'PAID', paidAt: new Date(), paymentRef: req.body.reference || `PROV-${Date.now()}` }
-    : { status: 'OVERDUE' };
-  const updated = await prisma.lmsFeeChallan.update({ where: { id }, data });
+  let updated;
+  if (action === 'approve') {
+    const r = await recordPayment({
+      req, challanId: id, method: 'BANK', channel: 'FINANCE',
+      reference: req.body.reference || `PROV-${Date.now().toString(36).toUpperCase()}-${id}`,
+      note: 'Approved by the Provost',
+    });
+    if (r.error) throw httpError(r.status || 400, r.error);
+    updated = r.challan;
+  } else {
+    updated = await prisma.lmsFeeChallan.update({ where: { id }, data: { status: 'OVERDUE' } });
+  }
   await audit(req, action === 'approve' ? 'PROVOST_FEE_APPROVE' : 'PROVOST_FEE_REJECT', 'LmsFeeChallan', id, { before, after: { status: updated.status } });
   await notify(challan.studentId, {
     title: action === 'approve' ? 'Fee payment approved' : 'Fee payment rejected',
@@ -960,7 +969,7 @@ router.put('/me/password', PROVOST, validate([
 router.get('/counts', PROVOST, asyncHandler(async (req, res) => {
   const [approvals, defaulters, unread] = await Promise.all([
     prisma.approvalRequest.count({ where: { assignedRole: 'Provost', status: { in: ['PENDING', 'IN_REVIEW', 'ESCALATED'] } } }),
-    prisma.lmsFeeChallan.count({ where: { status: { in: ['UNPAID', 'OVERDUE'] } } }),
+    prisma.lmsFeeChallan.count({ where: { status: { in: ['UNPAID', 'PARTIAL', 'OVERDUE'] } } }),
     prisma.lmsNotification.count({ where: { userId: req.lmsUser.id, isRead: false } }),
   ]);
   res.json({ approvals, defaulters, notifications: unread });

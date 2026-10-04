@@ -24,7 +24,7 @@
  * When not configured for LIVE, the helper falls back to a deterministic
  * sandbox transaction so the full flow works end-to-end in dev.
  *
- * See docs/PAYMENT_GATEWAY_INTEGRATION.md for the full developer guide.
+ * Configuration is documented in the README (Integrations → Bank payment gateway).
  */
 const crypto = require('crypto');
 const prisma = require('./prisma');

@@ -19,6 +19,7 @@ const ROLE_BASE = {
   exam_coordinator: "/exam",
   director_qec: "/qec",
   provost: "/provost",
+  finance: "/finance",
 };
 
 /* ------------------------------------------------------------------

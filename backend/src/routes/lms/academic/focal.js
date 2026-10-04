@@ -31,6 +31,7 @@ const {
   studentWhere, teacherWhere, byOfferingWhere, byStudentWhere,
 } = require('../../../utils/lmsDeptScope');
 const { uploadPhoto } = require('../../../middleware/upload');
+const { heldStudents } = require('../../../services/feeHolds');
 const realtime = require('../../../utils/lmsRealtime');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -716,9 +717,14 @@ router.get('/promotions', FOCAL_OR_GOV, asyncHandler(async (req, res) => {
     if (!byStudent[sid]) byStudent[sid] = { studentId: sid, roll: r.student.username, name: displayName(r.student), session: r.student.profile ? r.student.profile.session : null, program: r.student.profile ? r.student.profile.program : null, results: [] };
     byStudent[sid].results.push({ gradePoints: r.gradePoints, creditHours: r.offering.course.creditHours, percent: r.totalPercent });
   }
+  // Unpaid fee dues put promotion on Hold until cleared.
+  const held = await heldStudents(Object.keys(byStudent));
   const students = Object.values(byStudent).map((s) => {
     const { gpa, failing } = studentRisk(s.results);
-    return { studentId: s.studentId, roll: s.roll, name: s.name, session: s.session, program: s.program, gpa, courses: s.results.length, failing, eligible: gpa >= 2.0 && failing === 0, status: gpa >= 2.0 && failing === 0 ? 'Eligible' : 'Pending' };
+    const academicOk = gpa >= 2.0 && failing === 0;
+    const feeHold = held.has(s.studentId);
+    const status = feeHold ? 'Hold' : academicOk ? 'Eligible' : 'Pending';
+    return { studentId: s.studentId, roll: s.roll, name: s.name, session: s.session, program: s.program, gpa, courses: s.results.length, failing, eligible: academicOk && !feeHold, feeHold, outstandingDues: held.get(s.studentId) || 0, status };
   }).sort((a, b) => b.gpa - a.gpa);
   res.json({ promotions: students });
 }));
@@ -1303,9 +1309,11 @@ router.post('/discipline', FOCAL, validate([
         challanNo,
         title: `Fine: ${subject}`,
         lineItems: JSON.stringify([{ label: fineDescription || subject, amount: fineAmt }]),
+        grossAmount: fineAmt,
         totalAmount: fineAmt,
         dueDate: dueStr,
         status: 'UNPAID',
+        kind: 'FINE',
         feeType: 'OTHER',
         program: prof ? prof.programShortForm : null,
         department: prof ? prof.department : null,

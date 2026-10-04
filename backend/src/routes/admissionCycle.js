@@ -1,6 +1,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const { feeEvents, ADMISSION_ANNOUNCED } = require('../utils/feeEvents');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -437,6 +438,8 @@ router.post('/announce', authenticate, requireAdmin, async (req, res) => {
         data: { admissionCycleId: cycle.id, ...cp, isOpen: true },
       });
     }
+
+    feeEvents.emit(ADMISSION_ANNOUNCED, { cycleId: cycle.id, actor: { role: 'DirectorAdmissions', label: req.user.email } });
 
     cycle.applicationFee = cycle.applicationProcessingFee;
     res.status(201).json({

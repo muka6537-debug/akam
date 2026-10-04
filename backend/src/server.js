@@ -18,6 +18,7 @@ const admissionCycleRoutes = require('./routes/admissionCycle');
 const meritRoutes = require('./routes/merit');
 const feeRoutes = require('./routes/fee');
 const feeManagementRoutes = require('./routes/feeManagement');
+const feeStructureRoutes = require('./routes/feeStructures');
 const enrollmentRoutes = require('./routes/enrollment');
 const paymentMethodsRoutes = require('./routes/paymentMethods');
 const documentViewRoutes = require('./routes/documentView');
@@ -121,6 +122,7 @@ app.use('/api/merit', meritRoutes);
 app.use('/api/fee', feeRoutes);
 // Fee Management (Fix 3) — per-department/per-program semester fee + payment approval
 app.use('/api/fee-management', feeManagementRoutes);
+app.use('/api/fee-structures', feeStructureRoutes);
 app.use('/api/enrollment', enrollmentRoutes);
 app.use('/api/payment-methods', paymentMethodsRoutes);
 app.use('/api/files', documentViewRoutes);
@@ -183,6 +185,7 @@ app.use('/api/lms/academic/exam/workflow', require('./routes/lms/academic/examWo
 app.use('/api/lms/academic/exam', lmsAcademicExamRoutes);
 app.use('/api/lms/academic/qec', lmsAcademicQecRoutes);
 app.use('/api/lms/academic/provost', lmsAcademicProvostRoutes);
+app.use('/api/lms/academic/fees', require('./routes/lms/academic/fees'));
 // Support & Grievances staff management surface (all staff roles).
 app.use('/api/lms/academic/grievances', lmsAcademicGrievancesRoutes);
 app.use('/api/lms/academic', lmsAcademicStructureRoutes);
@@ -264,10 +267,10 @@ app.use((err, req, res, next) => {
 // leaves all real user/role data untouched. This is the same logic
 // exposed via `npm run prisma:seed:demo`; wiring it here means the
 // accounts auto-exist without a manual seed step.
-// Disable with DISABLE_DEMO_SEED=1 if ever undesired in production.
+// Skipped with DISABLE_DEMO_SEED=1, and always skipped in production.
 // ============================================================
 (async () => {
-  if (process.env.DISABLE_DEMO_SEED === '1') return;
+  if (process.env.DISABLE_DEMO_SEED === '1' || process.env.NODE_ENV === 'production') return;
   try {
     const { PrismaClient } = require('@prisma/client');
     const { seedDemoAccounts } = require('../prisma/seedDemoAccounts');
@@ -350,6 +353,29 @@ app.use((err, req, res, next) => {
     const out = await require('./services/liveClassSync').syncOfferings();
     console.log(`[startup-live-class-sync] created ${out.created}, updated ${out.updated}, removed ${out.removed}.`);
   } catch (e) { console.warn('[startup-live-class-sync] Skipped:', e.message); }
+})();
+
+// Fee module: seed default heads, payment methods and concession types, then
+// keep late fees, overdue status, deadline reminders and concession
+// conditions current every 15 minutes.
+(async () => {
+  const { ensureDefaultHeads } = require('./services/feeStructure');
+  const billing = require('./services/feeBilling');
+  const concessions = require('./services/feeConcessions');
+  const tick = async () => {
+    try {
+      await billing.refreshOpenChallans();
+      await billing.sendDeadlineReminders();
+      await concessions.review(null);
+    } catch (e) { console.warn('[fee-scheduler]', e.message); }
+  };
+  try {
+    await ensureDefaultHeads();
+    await billing.ensureDefaults();
+    await tick();
+    setInterval(tick, 15 * 60 * 1000).unref();
+    console.log('[fee-module] Defaults ensured, scheduler running.');
+  } catch (e) { console.warn('[fee-module] Skipped:', e.message); }
 })();
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -31,6 +31,7 @@ const { audit } = require('../../../utils/lmsAudit');
 const { notify, notifyMany } = require('../../../utils/lmsNotify');
 const { displayName } = require('../../../utils/lmsWorkflow');
 const realtime = require('../../../utils/lmsRealtime');
+const { assertNoDues } = require('../../../services/feeHolds');
 const { buildDeptScope, resolveDepartmentInstructorIds, getUserDepartment, resolveDepartmentPrograms } = require('../../../utils/lmsDeptScope');
 
 const router = express.Router();
@@ -662,6 +663,7 @@ router.put('/enrollment/requests/:id/decide', COORD, validate([
   }
 
   const newStatus = action === 'approve' ? 'ENROLLED' : 'DROPPED';
+  if (newStatus === 'ENROLLED') await assertNoDues(reg.studentId, 'Course registration');
   const updated = await prisma.courseRegistration.update({ where: { id }, data: { status: newStatus } });
   await audit(req, `ENROLLMENT_${action.toUpperCase()}`, 'CourseRegistration', id, { before: { status: reg.status }, after: { status: newStatus, note: note || null } });
   await notify(reg.studentId, { title: `Enrollment ${action === 'approve' ? 'approved' : 'rejected'}`, message: note || `Your enrollment request was ${newStatus.toLowerCase()}.`, type: 'INFO' });

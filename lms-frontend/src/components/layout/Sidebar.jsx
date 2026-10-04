@@ -41,7 +41,8 @@ const studentMenu = [
   { label: "Support & Grievances", icon: "ShieldAlert", to: "/student/appeals" },
   { label: "QEC Surveys", icon: "ClipboardList", to: "/student/surveys", badge: "QEC", badgeColor: "violet" },
   { section: "OTHER" },
-  { label: "Accounts Book", icon: "Wallet", to: "/student/account" },
+  { label: "Fee Account", icon: "Wallet", to: "/student/account" },
+  { label: "Admit Card", icon: "IdCard", to: "/student/admit-card" },
   { label: "Sticky Notes", icon: "StickyNote", to: "/student/notes" },
   { label: "Schedule", icon: "Calendar", to: "/student/schedule" },
   { label: "Settings", icon: "Settings", to: "/student/settings" },
@@ -107,6 +108,7 @@ const adminMenu = [
   { label: "Support & Grievances", icon: "ShieldAlert", to: "/admin/appeals" },
   { label: "Announcements", icon: "Megaphone", to: "/admin/announcements" },
   { label: "Quick Messages", icon: "Send", to: "/admin/quick-messages", badge: "New", badgeColor: "violet" },
+  { label: "Fee Charges", icon: "Receipt", to: "/admin/fee-charges" },
   { label: "Settings", icon: "Settings", to: "/admin/settings" },
 ];
 
@@ -132,6 +134,8 @@ const focalMenu = [
   { label: "Student Block", icon: "UserX", to: "/focal/student-drop" },
   { label: "Discipline & Fines", icon: "AlertOctagon", to: "/focal/discipline", badge: "New", badgeColor: "violet" },
   { label: "Fine Management", icon: "DollarSign", to: "/focal/fines", badge: "New", badgeColor: "emerald" },
+  { label: "Fee Reports", icon: "FileBarChart", to: "/focal/fee-reports" },
+  { label: "Fee Defaulters", icon: "UserX", to: "/focal/fee-defaulters" },
   { section: "MONITORING (VIEW ONLY)" },
   { label: "Lab Tasks Monitor", icon: "FlaskConical", to: "/focal/lab-tasks" },
   { label: "Attendance Analytics", icon: "CalendarCheck", to: "/focal/attendance" },
@@ -212,9 +216,8 @@ const qecMenu = [
 ];
 
 /* =========================================================================
- * PROVOST MENU — University-wide executive oversight + Finance Coordination
- *   - MERGED in former Finance Coordinator responsibilities:
- *     Fee Announcements, Fee Approvals, Fee Monitoring, Defaulters, Fines
+ * PROVOST MENU — University-wide executive oversight, the Provost fee
+ *   management pages and the centralized fee module
  * ======================================================================= */
 const provostMenu = [
   { section: "EXECUTIVE OVERVIEW" },
@@ -237,12 +240,35 @@ const provostMenu = [
   { label: "Fee Approvals", icon: "BadgeCheck", to: "/provost/fee-approvals", badge: "3", badgeColor: "amber" },
   { label: "Fines Management", icon: "AlertCircle", to: "/provost/fines" },
   { label: "Defaulters", icon: "UserMinus", to: "/provost/defaulters" },
+  { section: "CENTRALIZED FEE MODULE" },
+  { label: "Fee Notifications", icon: "Megaphone", to: "/provost/fee-notifications" },
+  { label: "Concessions", icon: "BadgePercent", to: "/provost/concessions" },
+  { label: "Fee Status Reports", icon: "FileBarChart", to: "/provost/fee-status-reports" },
+  { label: "Dues Holds", icon: "UserX", to: "/provost/fee-defaulters" },
+  { label: "Fee Setup", icon: "Settings2", to: "/provost/fee-setup" },
+  { label: "Fee Audit Log", icon: "ScrollText", to: "/provost/fee-audit" },
   { section: "STUDENT SUPPORT" },
   { label: "Support & Grievances", icon: "ShieldAlert", to: "/provost/grievances" },
   { section: "REPORTING" },
   { label: "Strategic Reports", icon: "FileBarChart", to: "/provost/reports" },
   { label: "Activity Logs", icon: "ScrollText", to: "/provost/activity-logs" },
   { label: "Settings", icon: "Settings", to: "/provost/settings" },
+];
+
+/* =========================================================================
+ * FINANCE MENU — payment confirmation, charges, fee setup and reports
+ * ======================================================================= */
+const financeMenu = [
+  { section: "FEES" },
+  { label: "Fee Reports", icon: "FileBarChart", to: "/finance" },
+  { label: "Payments", icon: "BadgeCheck", to: "/finance/payments" },
+  { label: "Fee Notifications", icon: "Megaphone", to: "/finance/notifications" },
+  { label: "Concessions", icon: "BadgePercent", to: "/finance/concessions" },
+  { label: "Fee Charges", icon: "Receipt", to: "/finance/charges" },
+  { label: "Fee Defaulters", icon: "UserX", to: "/finance/defaulters" },
+  { section: "CONFIGURATION" },
+  { label: "Fee Setup", icon: "Settings2", to: "/finance/setup" },
+  { label: "Fee Audit Log", icon: "ScrollText", to: "/finance/audit" },
 ];
 
 const MENUS = {
@@ -253,6 +279,7 @@ const MENUS = {
   exam_coordinator: examMenu,
   director_qec: qecMenu,
   provost: provostMenu,
+  finance: financeMenu,
 };
 
 /* Per-role base path used by the user card link + active matcher. */
@@ -264,6 +291,7 @@ const ROLE_BASE = {
   exam_coordinator: "/exam",
   director_qec: "/qec",
   provost: "/provost",
+  finance: "/finance",
 };
 
 const Sidebar = ({ isOpen, onClose, collapsed, onToggleCollapse }) => {

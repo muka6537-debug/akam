@@ -1,159 +1,200 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { useMemo, useState } from "react";
-import { Wallet, CheckCircle2, AlertTriangle, Download, Receipt, CreditCard } from "lucide-react";
+import { Wallet, CheckCircle2, AlertTriangle, CalendarClock, BadgePercent, Receipt, CreditCard, Download, Lock } from "lucide-react";
 import PageHeader from "../../components/common/PageHeader";
+import Modal from "../../components/common/Modal";
 import { Skeleton } from "../../components/common/Skeleton";
 import ErrorState from "../../components/common/ErrorState";
 import EmptyState from "../../components/common/EmptyState";
 import useApi from "../../hooks/useApi";
 import api from "../../services/api";
-import { fileUrl } from "../../services/api";
 import { useToast } from "../../context/ToastContext";
+import { money, fmtDate } from "../../utils/feeFormat";
+import { FeeStatus, Field } from "../../components/fees/feeUi";
 
-const fmtMoney = (n) => `Rs. ${Number(n || 0).toLocaleString("en-PK")}`;
-const fmtDate = (d) => {
-  if (!d) return "—";
-  try {
-    return new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-  } catch {
-    return d;
-  }
-};
-
-const statusChip = (s) => {
-  const v = (s || "").toUpperCase();
-  if (v === "PAID") return "bg-emerald-100 text-emerald-700";
-  if (v === "OVERDUE") return "bg-rose-100 text-rose-700";
-  if (v === "PARTIAL") return "bg-amber-100 text-amber-700";
-  return "bg-slate-100 text-slate-600";
-};
-
-const safeItems = (li) => {
-  if (Array.isArray(li)) return li;
-  if (typeof li === "string") {
-    try { const p = JSON.parse(li); return Array.isArray(p) ? p : []; } catch { return []; }
-  }
-  return [];
-};
+const OPEN = ["UNPAID", "PARTIAL", "OVERDUE"];
 
 const AccountBook = () => {
   const { toast } = useToast();
-  const { data, loading, error, reload } = useApi(() => api.student.fees(), []);
-  const [paying, setPaying] = useState(null);
+  const { data, loading, error, reload } = useApi(() => api.fees.me(), []);
+  const [pay, setPay] = useState(null);
+  const [busy, setBusy] = useState(false);
 
-  const challans = useMemo(() => data?.challans || [], [data]);
-  const summary = data?.summary || { total: 0, paid: 0, outstanding: 0 };
-
-  const payNow = async (ch) => {
-    setPaying(ch.id);
+  const checkout = async () => {
+    setBusy(true);
     try {
-      await api.student.payFee(ch.id, { method: "OneLink" });
-      toast(`Payment successful — ${ch.title} marked as Paid`, { type: "success" });
+      const r = await api.fees.pay(pay.challan.id, { method: pay.method, amount: pay.amount || undefined });
+      toast(r.challan.status === "PAID" ? "Payment confirmed — challan fully paid" : "Payment received", { type: "success" });
+      setPay(null);
       reload();
     } catch (e) {
-      toast(e.message || "Payment failed", { type: "error" });
+      toast(e.message, { type: "error" });
     } finally {
-      setPaying(null);
+      setBusy(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div>
-        <PageHeader title="Accounts Book" subtitle="Fee challans, payments, and dues" icon="Wallet" breadcrumb={["Dashboard", "Accounts Book"]} />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-2xl" />)}</div>
-        <Skeleton className="h-64 rounded-2xl" />
-      </div>
-    );
-  }
+  const header = <PageHeader title="Fee Account" subtitle="Dues, challans, concessions and payment history" icon="Wallet" breadcrumb={["Dashboard", "Fee Account"]} />;
+  if (loading) return <div>{header}<Skeleton className="h-64 rounded-2xl" /></div>;
+  if (error) return <div>{header}<ErrorState description={error} onRetry={reload} /></div>;
+
+  const { summary, challans, payments, hold, concessions, methods, admissionFees = [] } = data;
+  const method = methods.find((m) => m.code === pay?.method);
+  const cards = [
+    { label: "Total Due", value: money(summary.totalDue), icon: Wallet, color: "from-blue-500 to-indigo-600" },
+    { label: "Paid", value: money(summary.paid), icon: CheckCircle2, color: "from-emerald-500 to-teal-600" },
+    { label: "Remaining", value: money(summary.remaining), icon: AlertTriangle, color: "from-rose-500 to-pink-600" },
+    { label: "Deadline", value: fmtDate(summary.deadline), icon: CalendarClock, color: "from-amber-500 to-orange-600" },
+    { label: "Concessions Applied", value: money(summary.concessions), icon: BadgePercent, color: "from-purple-500 to-violet-600" },
+  ];
 
   return (
     <div>
-      <PageHeader title="Accounts Book" subtitle="Fee challans, payments, and dues" icon="Wallet" breadcrumb={["Dashboard", "Accounts Book"]} />
-
-      {error ? (
-        <ErrorState description={error} onRetry={reload} />
-      ) : challans.length === 0 ? (
-        <EmptyState icon="Wallet" title="No fee records" description="Your fee challans and payment history will appear here once generated by the finance office." />
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-            {[
-              { label: "Total Billed", value: fmtMoney(summary.total), color: "from-blue-500 to-indigo-600", icon: Wallet },
-              { label: "Total Paid", value: fmtMoney(summary.paid), color: "from-emerald-500 to-teal-600", icon: CheckCircle2 },
-              { label: "Outstanding", value: fmtMoney(summary.outstanding), color: "from-rose-500 to-pink-600", icon: AlertTriangle },
-            ].map((s, i) => (
-              <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className={`relative bg-gradient-to-br ${s.color} rounded-2xl p-5 text-white overflow-hidden`}>
-                <div className="absolute -right-2 -top-2 w-20 h-20 bg-white/10 rounded-full blur-xl" />
-                <s.icon size={22} className="mb-2" />
-                <p className="font-display text-2xl font-extrabold">{s.value}</p>
-                <p className="text-xs opacity-90">{s.label}</p>
-              </motion.div>
-            ))}
+      {header}
+      {hold.onHold && (
+        <div className="mb-5 p-4 rounded-2xl border border-rose-200 bg-rose-50 dark:bg-rose-950/30 dark:border-rose-900 text-rose-700 dark:text-rose-300 flex gap-3">
+          <Lock size={20} className="shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-bold">Academic hold — unpaid dues</p>
+            <p>{hold.message} Course registration and admit card are blocked and your promotion is on Hold until the overdue challans are paid.</p>
           </div>
-
-          <div className="space-y-4">
-            {challans.map((ch, i) => {
-              const items = safeItems(ch.lineItems);
-              return (
-                <motion.div key={ch.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
-                  <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-primary-50 dark:bg-primary-900/30"><Receipt size={20} className="text-primary-600" /></div>
-                      <div>
-                        <p className="font-display font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                          {ch.title}
-                          {ch.source === "admission" && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">ADMISSION</span>
-                          )}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Challan #{ch.challanNo}{ch.source === "admission" ? "" : ` · Due ${fmtDate(ch.dueDate)}`}</p>
-                      </div>
-                    </div>
-                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${statusChip(ch.status)}`}>{ch.status}</span>
-                  </div>
-                  {items.length > 0 && (
-                    <div className="px-5 py-3">
-                      <table className="w-full text-sm">
-                        <tbody>
-                          {items.map((it, j) => (
-                            <tr key={j} className="border-b border-slate-50 dark:border-slate-800/50 last:border-0">
-                              <td className="py-1.5 text-slate-700 dark:text-slate-300">{it.label || it.name || it.description}</td>
-                              <td className="py-1.5 text-right font-semibold text-slate-900 dark:text-slate-100">{fmtMoney(it.amount)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <div className="px-5 py-3 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between flex-wrap gap-2">
-                    <div className="text-sm">
-                      <span className="text-slate-500 dark:text-slate-400">Total: </span>
-                      <span className="font-display font-extrabold text-lg text-slate-900 dark:text-slate-100">{fmtMoney(ch.totalAmount)}</span>
-                      {ch.status === "PAID" && ch.paidAt && (
-                        <span className="ml-3 text-xs text-emerald-600 font-semibold">Paid {fmtDate(ch.paidAt)}{ch.paymentRef ? ` · Ref ${ch.paymentRef}` : ""}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {ch.fileName && (
-                        <a href={fileUrl(ch.fileName)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600">
-                          <Download size={14} /> Download Challan
-                        </a>
-                      )}
-                      {ch.status !== "PAID" && ch.status !== "WAIVED" && (
-                        <button onClick={() => payNow(ch)} disabled={paying === ch.id}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
-                          <CreditCard size={14} /> {paying === ch.id ? "Processing…" : "Pay Now"}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        </>
+        </div>
       )}
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
+        {cards.map((c, i) => (
+          <motion.div key={c.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
+            className={`bg-gradient-to-br ${c.color} rounded-2xl p-4 text-white`}>
+            <c.icon size={20} className="mb-2" />
+            <p className="font-display text-xl font-extrabold">{c.value}</p>
+            <p className="text-xs opacity-90">{c.label}</p>
+          </motion.div>
+        ))}
+      </div>
+
+      {concessions.length > 0 && (
+        <div className="card-base p-4 mb-6">
+          <p className="font-display font-bold text-app mb-2">Concessions</p>
+          <ul className="space-y-1.5 text-sm">
+            {concessions.map((c) => (
+              <li key={c.id} className="flex flex-wrap gap-x-2 items-center">
+                <FeeStatus status={c.status} />
+                <b>{c.typeName}</b> {c.valueLabel} on {c.heads} · {c.coverage}
+                <span className="text-muted-app">— {c.reason}{c.minCgpa != null ? ` (maintain CGPA ≥ ${c.minCgpa})` : ""}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {challans.length === 0 ? (
+        <EmptyState icon="Wallet" title="No challans yet" description="Fee challans appear here as soon as the university announces them." />
+      ) : (
+        <div className="space-y-4 mb-8">
+          {challans.map((ch) => (
+            <div key={ch.id} className="card-base overflow-hidden">
+              <div className="px-5 py-4 border-b border-app flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-primary-50 dark:bg-primary-900/30"><Receipt size={20} className="text-primary-600" /></div>
+                  <div>
+                    <p className="font-display font-bold text-app">{ch.title}</p>
+                    <p className="text-xs text-muted-app">Challan {ch.challanNo} · Semester {ch.semester ?? "—"} · Due {fmtDate(ch.dueDate)}</p>
+                  </div>
+                </div>
+                <FeeStatus status={ch.status} />
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {ch.lineItems.map((it, j) => (
+                    <tr key={j} className="border-b border-app/40 last:border-0">
+                      <td className="py-1.5 px-5">{it.label}</td>
+                      <td className="py-1.5 px-5 text-right text-xs text-purple-600">{it.concession ? `− ${money(it.concession)}` : ""}</td>
+                      <td className="py-1.5 px-5 text-right font-semibold tabular-nums">{money(it.net ?? it.amount)}</td>
+                    </tr>
+                  ))}
+                  {ch.lateFee > 0 && (
+                    <tr><td className="py-1.5 px-5 text-rose-600">Late fee</td><td /><td className="py-1.5 px-5 text-right font-semibold text-rose-600">{money(ch.lateFee)}</td></tr>
+                  )}
+                </tbody>
+              </table>
+              <div className="px-5 py-3 bg-app-subtle flex items-center justify-between flex-wrap gap-2 text-sm">
+                <span>Net {money(ch.payable)} · Paid {money(ch.paidAmount)} · <b>Remaining {money(ch.remaining)}</b></span>
+                <div className="flex gap-2">
+                  <button className="btn-ghost text-xs py-1.5" onClick={() => api.fees.downloadChallan(ch.id, ch.challanNo)}><Download size={14} /> Challan</button>
+                  {OPEN.includes(ch.status) && (
+                    <button className="btn-primary text-xs py-1.5" onClick={() => setPay({ challan: ch, method: methods[0]?.code, amount: "" })}><CreditCard size={14} /> Pay</button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {admissionFees.length > 0 && (
+        <div className="card-base p-4 mb-6">
+          <p className="font-display font-bold text-app mb-3">Admission fees</p>
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-muted-app uppercase"><th className="py-2">Date</th><th>Fee</th><th>Reference</th><th className="text-right">Amount</th></tr></thead>
+            <tbody>
+              {admissionFees.map((f) => (
+                <tr key={f.id} className="border-t border-app/40">
+                  <td className="py-2">{fmtDate(f.paidAt || f.createdAt)}</td>
+                  <td>{f.title} <FeeStatus status={f.status} /></td>
+                  <td className="text-xs">{f.paymentRef || f.challanNo}</td>
+                  <td className="text-right font-semibold tabular-nums">{money(f.totalAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-muted-app mt-2">Paid during admissions; shown for your records.</p>
+        </div>
+      )}
+
+      <div className="card-base p-4">
+        <p className="font-display font-bold text-app mb-3">Payment history</p>
+        {payments.length === 0 ? <p className="text-sm text-muted-app">No payments yet.</p> : (
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-muted-app uppercase"><th className="py-2">Date</th><th>Challan</th><th>Method</th><th>Reference</th><th className="text-right">Amount</th></tr></thead>
+            <tbody>
+              {payments.map((p) => (
+                <tr key={p.id} className="border-t border-app/40">
+                  <td className="py-2">{fmtDate(p.createdAt)}</td>
+                  <td>{p.challanNo}</td>
+                  <td>{methods.find((m) => m.code === p.method)?.label || p.method}</td>
+                  <td className="text-xs">{p.reference}</td>
+                  <td className="text-right font-semibold tabular-nums">{money(p.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <Modal open={!!pay} onClose={() => setPay(null)} title="Pay Challan" subtitle={pay && `${pay.challan.challanNo} · remaining ${money(pay.challan.remaining)}`} icon={CreditCard}>
+        {pay && (
+          <div className="space-y-3">
+            <Field label="Payment method">
+              <select className="input-base" value={pay.method} onChange={(e) => setPay({ ...pay, method: e.target.value })}>
+                {methods.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
+              </select>
+            </Field>
+            {method?.instructions && <p className="text-xs text-muted-app">{method.instructions}</p>}
+            {method?.confirmMode === "INSTANT" ? (
+              <>
+                <Field label="Amount" hint="Leave blank to pay the full remaining amount">
+                  <input type="number" min="0" className="input-base" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
+                </Field>
+                <div className="flex justify-end"><button className="btn-primary" disabled={busy} onClick={checkout}>{busy ? "Processing…" : "Pay Now"}</button></div>
+              </>
+            ) : (
+              <div className="flex justify-end">
+                <button className="btn-secondary" onClick={() => api.fees.downloadChallan(pay.challan.id, pay.challan.challanNo)}><Download size={14} /> Download Challan</button>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

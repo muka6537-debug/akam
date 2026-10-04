@@ -163,6 +163,17 @@ import ProvostFeeRecords from "./pages/provost/FeeRecords";
 import ProvostFeeReports from "./pages/provost/FeeReports";
 import ProvostGrievances from "./pages/provost/Grievances";
 
+// Centralized Fee Module (shared by Provost, Finance, Focal Person, Coordinator)
+import FeeNotifications from "./pages/fees/FeeNotifications";
+import FeeConcessions from "./pages/fees/Concessions";
+import FeeReports from "./pages/fees/FeeReports";
+import FeeDefaulters from "./pages/fees/FeeDefaulters";
+import FeePayments from "./pages/fees/FeePayments";
+import FeeSetup from "./pages/fees/FeeSetup";
+import FeeCharges from "./pages/fees/FeeCharges";
+import FeeAudit from "./pages/fees/FeeAudit";
+import StudentAdmitCard from "./pages/student/AdmitCard";
+
 /* =========================================================================
  * Role → URL base mapping (Finance role merged into Provost)
  * ======================================================================= */
@@ -174,6 +185,7 @@ const ROLE_BASE = {
   exam_coordinator: "/exam",
   director_qec: "/qec",
   provost: "/provost",
+  finance: "/finance",
 };
 
 /* Every existing route is wrapped with this Protected component. It now
@@ -230,6 +242,7 @@ function App() {
         <Route path="results" element={<StudentResults />} />
         <Route path="cgpa" element={<StudentCGPA />} />
         <Route path="account" element={<StudentAccount />} />
+        <Route path="admit-card" element={<StudentAdmitCard />} />
         <Route path="notes" element={<StudentNotes />} />
         <Route path="scheme" element={<StudentScheme />} />
         <Route path="schedule" element={<StudentSchedule />} />
@@ -375,6 +388,7 @@ function App() {
         <Route path="live-classes" element={<AdminLiveClassSchedule />} />
         <Route path="teacher-replacement" element={<AdminTeacherReplacement />} />
         <Route path="quick-messages" element={<AdminQuickMessages />} />
+        <Route path="fee-charges" element={<FeeCharges />} />
         <Route path="settings" element={<CoordinatorSettings />} />
       </Route>
 
@@ -405,6 +419,8 @@ function App() {
         <Route path="deactivations" element={<FocalDeactivations />} />
         <Route path="discipline" element={<FocalDiscipline />} />
         <Route path="fines" element={<FocalFineManagement />} />
+        <Route path="fee-reports" element={<FeeReports />} />
+        <Route path="fee-defaulters" element={<FeeDefaulters />} />
         <Route path="grievances" element={<FocalGrievances />} />
         <Route path="reports" element={<FocalReports />} />
         <Route path="activity-logs" element={<FocalActivityLogs />} />
@@ -489,7 +505,6 @@ function App() {
         <Route path="faculty" element={<ProvostFaculty />} />
         <Route path="students" element={<ProvostStudents />} />
         <Route path="finance" element={<ProvostFinance />} />
-        {/* Provost Fee Management module */}
         <Route path="fee-management" element={<ProvostFeeManagement />} />
         <Route path="fee-announce" element={<ProvostFeeAnnounce />} />
         <Route path="fee-records" element={<ProvostFeeRecords />} />
@@ -497,16 +512,39 @@ function App() {
         <Route path="fee-announcements" element={<ProvostFeeAnnouncements />} />
         <Route path="exam-fee-announcements" element={<ProvostExamFeeAnnouncements />} />
         <Route path="fee-approvals" element={<ProvostFeeApprovals />} />
-        <Route path="fines" element={<ProvostFines />} />
         <Route path="defaulters" element={<ProvostDefaulters />} />
+        {/* Centralized fee module */}
+        <Route path="fee-notifications" element={<FeeNotifications />} />
+        <Route path="concessions" element={<FeeConcessions />} />
+        <Route path="fee-status-reports" element={<FeeReports />} />
+        <Route path="fee-defaulters" element={<FeeDefaulters />} />
+        <Route path="fee-setup" element={<FeeSetup />} />
+        <Route path="fee-audit" element={<FeeAudit />} />
+        <Route path="fines" element={<ProvostFines />} />
         <Route path="grievances" element={<ProvostGrievances />} />
         <Route path="reports" element={<ProvostReports />} />
         <Route path="activity-logs" element={<ProvostActivityLogs />} />
         <Route path="settings" element={<ProvostSettings />} />
       </Route>
-      {/* Legacy redirects: finance coordinator merged into provost */}
-      <Route path="/finance" element={<Navigate to="/provost/finance" replace />} />
-      <Route path="/finance_coordinator" element={<Navigate to="/provost" replace />} />
+      {/* ============ FINANCE ============ */}
+      <Route
+        path="/finance"
+        element={
+          <Protected role="finance">
+            <DashboardLayout />
+          </Protected>
+        }
+      >
+        <Route index element={<FeeReports />} />
+        <Route path="payments" element={<FeePayments />} />
+        <Route path="notifications" element={<FeeNotifications />} />
+        <Route path="concessions" element={<FeeConcessions />} />
+        <Route path="charges" element={<FeeCharges />} />
+        <Route path="defaulters" element={<FeeDefaulters />} />
+        <Route path="setup" element={<FeeSetup />} />
+        <Route path="audit" element={<FeeAudit />} />
+      </Route>
+      <Route path="/finance_coordinator" element={<Navigate to="/finance" replace />} />
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -2894,7 +2894,7 @@ const PaymentMethodsSection = () => {
               onChange={e => handleConfigChange('bankGatewayInstructions', e.target.value)} />
             <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 6 }}>
               <i className="fas fa-circle-info" style={{ marginRight: 4 }} />
-              Gateway credentials (API key, secret, merchant id, webhooks) are configured under Super Admin → Payment Gateway. See the developer guide (docs/PAYMENT_GATEWAY_INTEGRATION.md).
+              Gateway credentials (API key, secret, merchant id, webhooks) are configured under Super Admin → Payment Gateway.
             </div>
           </div>
 
