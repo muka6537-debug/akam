@@ -19,13 +19,16 @@ function clientIp(req) {
   );
 }
 
-async function audit(req, action, entity, entityId, { before, after } = {}) {
+// `actor` labels events with no LMS session behind them (admissions-side
+// triggers, scheduled jobs), e.g. { role: 'DirectorAdmissions', label: email }.
+async function audit(req, action, entity, entityId, { before, after, actor: system } = {}) {
   try {
     const actor = req && req.lmsUser ? req.lmsUser : null;
+    const systemRole = system ? [system.role, system.label].filter(Boolean).join(':') : null;
     await prisma.lmsAuditLog.create({
       data: {
         actorId: actor ? actor.id : null,
-        actorRole: actor ? actor.role : null,
+        actorRole: actor ? actor.role : systemRole,
         action,
         entity,
         entityId: entityId != null ? String(entityId) : null,

@@ -117,6 +117,7 @@ const CATEGORY_CATALOG = [
       { value: 'QUIZ', label: 'Quiz', role: 'TEACHER' },
       { value: 'EXAM', label: 'Exam', role: 'EXAM_CONTROLLER' },
       { value: 'RESULT', label: 'Result', role: 'EXAM_CONTROLLER' },
+      { value: 'ABSENCE_APPEAL', label: 'Absence Appeal (Rs. 1,000 fee)', role: 'EXAM_CONTROLLER' },
       { value: 'ATTENDANCE', label: 'Attendance', role: 'TEACHER' },
       { value: 'COURSE', label: 'Course', role: 'COURSE_COORDINATOR' },
       { value: 'COURSE_MATERIAL', label: 'Course Material', role: 'COURSE_COORDINATOR' },

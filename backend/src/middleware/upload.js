@@ -5,7 +5,7 @@ const fs = require('fs');
 const UPLOAD_BASE = path.join(__dirname, '..', '..', 'uploads');
 
 // Ensure directories exist
-const dirs = ['photos', 'cnic', 'dmc', 'receipts', 'education', 'lms-submissions', 'lms-materials', 'lms-library', 'lms-avatars', 'lms-messages', 'exam-papers', 'exam-profiles', 'qec-profiles'];
+const dirs = ['photos', 'cnic', 'dmc', 'receipts', 'education', 'lms-submissions', 'lms-materials', 'lms-library', 'lms-avatars', 'lms-messages', 'exam-papers', 'exam-profiles', 'qec-profiles', 'fee-proofs'];
 dirs.forEach(dir => {
   const dirPath = path.join(UPLOAD_BASE, dir);
   if (!fs.existsSync(dirPath)) {
@@ -185,4 +185,10 @@ const uploadQecProfilePhoto = multer({
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
 });
 
-module.exports = { uploadPhoto, uploadCNIC, uploadDMC, uploadEducation, uploadReceipt, uploadLmsSubmission, uploadLmsMaterial, uploadLmsLectureFallback, uploadLmsLibrary, uploadLmsAvatar, uploadLmsMessage, uploadExamPaper, uploadExamProfilePhoto, uploadQecProfilePhoto };
+const uploadFeeProof = multer({
+  storage: createStorage('fee-proofs'),
+  fileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+module.exports = { uploadFeeProof, uploadPhoto, uploadCNIC, uploadDMC, uploadEducation, uploadReceipt, uploadLmsSubmission, uploadLmsMaterial, uploadLmsLectureFallback, uploadLmsLibrary, uploadLmsAvatar, uploadLmsMessage, uploadExamPaper, uploadExamProfilePhoto, uploadQecProfilePhoto };

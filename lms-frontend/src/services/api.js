@@ -100,6 +100,14 @@ function fileUrl(relPath) {
   return `${origin}${relPath.startsWith('/') ? '' : '/'}${relPath}`;
 }
 
+// Build a query string from an object, skipping empty values.
+const qs = (o = {}) => {
+  const q = new URLSearchParams();
+  Object.entries(o).forEach(([k, v]) => { if (v != null && v !== '') q.set(k, v); });
+  const str = q.toString();
+  return str ? `?${str}` : '';
+};
+
 // ============================================================
 // ACADEMIC STRUCTURE (shared)
 // ============================================================
@@ -195,9 +203,10 @@ const student = {
   // Surveys
   surveys: () => get('/lms/academic/student/surveys'),
   submitSurvey: (id, answers) => post(`/lms/academic/student/surveys/${id}/submit`, { answers }),
-  // Fees / account
+  // Fees summary (dashboard widget) + exam admit card
   fees: () => get('/lms/academic/student/fees'),
-  payFee: (id, body = {}) => post(`/lms/academic/student/fees/${id}/pay`, body),
+  admitCard: () => get('/lms/academic/student/admit-card'),
+  downloadAdmitCard: () => download('/lms/academic/student/admit-card/pdf', 'admit-card.pdf'),
   // Notifications
   notifications: () => get('/lms/academic/student/notifications'),
   readNotification: (id) => put(`/lms/academic/student/notifications/${id}/read`),
@@ -858,6 +867,61 @@ const provost = {
 };
 
 // ============================================================
+// CENTRALIZED FEE MODULE — /lms/academic/fees/*
+// Role access is enforced server-side (Provost, Finance, Focal
+// Person, Course Coordinator, Student).
+// ============================================================
+const exportName = (name, format) => `${name}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+
+const fees = {
+  config: () => get('/lms/academic/fees/config'),
+  summary: () => get('/lms/academic/fees/summary'),
+  audit: (params) => get(`/lms/academic/fees/audit${qs(params)}`),
+  // Fee heads, batch structures, payment methods, concession types
+  createHead: (body) => post('/lms/academic/fees/heads', body),
+  updateHead: (id, body) => put(`/lms/academic/fees/heads/${id}`, body),
+  reviseStructureItem: (structureId, headId, amount) => put(`/lms/academic/fees/structures/${structureId}/items/${headId}`, { amount }),
+  createMethod: (body) => post('/lms/academic/fees/methods', body),
+  updateMethod: (id, body) => put(`/lms/academic/fees/methods/${id}`, body),
+  createConcessionType: (body) => post('/lms/academic/fees/concession-types', body),
+  // Provost notifications
+  notifications: () => get('/lms/academic/fees/notifications'),
+  notification: (id) => get(`/lms/academic/fees/notifications/${id}`),
+  announce: (body) => post('/lms/academic/fees/notifications', body),
+  regenerate: (id) => post(`/lms/academic/fees/notifications/${id}/regenerate`),
+  closeNotification: (id) => post(`/lms/academic/fees/notifications/${id}/close`),
+  // Students
+  students: (params) => get(`/lms/academic/fees/students${qs(params)}`),
+  student: (id) => get(`/lms/academic/fees/students/${id}`),
+  // Concessions
+  concessions: (params) => get(`/lms/academic/fees/concessions${qs(params)}`),
+  applyConcession: (formData) => postForm('/lms/academic/fees/concessions', formData),
+  reviseConcession: (id, body) => put(`/lms/academic/fees/concessions/${id}`, body),
+  revokeConcession: (id, reason) => post(`/lms/academic/fees/concessions/${id}/revoke`, { reason }),
+  reviewConcessions: () => post('/lms/academic/fees/concessions/review'),
+  concessionTrail: (id) => get(`/lms/academic/fees/concessions/${id}/trail`),
+  exportConcessions: (list, params, format) => download(`/lms/academic/fees/concession-lists/${list}/export${qs({ ...params, format })}`, exportName(`concessions-${list}`, format)),
+  // Challans + payments
+  challans: (params) => get(`/lms/academic/fees/challans${qs(params)}`),
+  recordPayment: (id, body) => post(`/lms/academic/fees/challans/${id}/payments`, body),
+  downloadChallan: (id, challanNo) => download(`/lms/academic/fees/challans/${id}/pdf`, `${challanNo || 'challan'}.pdf`),
+  // Charges
+  chargeFreeze: (body) => post('/lms/academic/fees/charges/freeze', body),
+  chargeResit: (body) => post('/lms/academic/fees/charges/resit', body),
+  chargeSpecialSemester: (body) => post('/lms/academic/fees/charges/special-semester', body),
+  chargeLateRegistration: (body) => post('/lms/academic/fees/charges/late-registration', body),
+  // Reports + defaulters
+  report: (kind, params) => get(`/lms/academic/fees/reports/${kind}${qs(params)}`),
+  exportReport: (kind, params, format) => download(`/lms/academic/fees/reports/${kind}/export${qs({ ...params, format })}`, exportName(`fee-report-${kind}`, format)),
+  defaulters: (params) => get(`/lms/academic/fees/defaulters${qs(params)}`),
+  exportDefaulters: (params, format) => download(`/lms/academic/fees/defaulters/export${qs({ ...params, format })}`, exportName('fee-defaulters', format)),
+  // Student self-service
+  me: () => get('/lms/academic/fees/me'),
+  pay: (id, body) => post(`/lms/academic/fees/me/challans/${id}/pay`, body),
+  hold: () => get('/lms/academic/fees/me/hold'),
+};
+
+// ============================================================
 // SUPPORT & GRIEVANCES — UNIFIED STAFF CLIENT
 // ------------------------------------------------------------
 // Consumes the additive staff router mounted at
@@ -908,12 +972,6 @@ const marks = {
   finalSubmit: (pin) => post('/lms/academic/teacher/marks/final-submit', { pin }),
 };
 
-const qs = (o = {}) => {
-  const q = new URLSearchParams();
-  Object.entries(o).forEach(([k, v]) => { if (v != null && v !== '') q.set(k, v); });
-  const str = q.toString();
-  return str ? `?${str}` : '';
-};
 const workflow = {
   summary: () => get('/lms/academic/exam/workflow/summary'),
   tree: (stage) => get(`/lms/academic/exam/workflow/${stage}/tree`),
@@ -930,6 +988,6 @@ const workflow = {
 student.resultRecord = () => get('/lms/academic/student/result-record');
 student.downloadTranscriptPdf = (kind, semester) => download(`/lms/academic/student/transcript/pdf/${kind}${semester ? `?semester=${semester}` : ''}`, `${kind}-transcript${semester ? `-sem${semester}` : ''}.pdf`);
 
-const api = { base: API_BASE, request, get, post, put, del, postForm, download, fileUrl, structure, student, teacher, coordinator, focal, exam, qec, provost, grievances, marks, workflow };
+const api = { base: API_BASE, request, get, post, put, del, postForm, download, fileUrl, structure, student, teacher, coordinator, focal, exam, qec, provost, fees, grievances, marks, workflow };
 export default api;
 export { fileUrl };

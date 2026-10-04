@@ -1,7 +1,7 @@
 // ============================================================
 //  LMS DEMO ACCOUNTS SEED  (idempotent, additive, NON-breaking)
 //  ------------------------------------------------------------
-//  Permanently provisions the seven role-based demo logins inside
+//  Permanently provisions the role-based demo logins inside
 //  the REAL database (LmsUser table) so they authenticate through
 //  the existing /api/lms/auth/login endpoint and land on their own
 //  role dashboard via the existing RBAC + routing.
@@ -22,6 +22,7 @@
 //  exam_controller         →  ExamController
 //  director_qec            →  QECCoordinator
 //  provost                 →  Provost
+//  finance                 →  Finance
 //
 //  Demo credentials
 //  ------------------------------------------------------------
@@ -32,6 +33,10 @@
 //    examcontroller_demo  / examcontroller@lms.com / Exam@123
 //    qec_demo             / qec@lms.com            / QEC@123
 //    provost_demo         / provost@lms.com        / Provost@123
+//    finance_demo         / finance@lms.com        / $LMS_DEMO_FINANCE_PASSWORD
+//
+//  The Finance demo password comes from the environment; the account is
+//  skipped when it is unset. Nothing is provisioned with NODE_ENV=production.
 // ============================================================
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
@@ -48,6 +53,7 @@ const DEMO_ACCOUNTS = [
   { username: 'examcontroller_demo', email: 'examcontroller@lms.com', password: 'Exam@123',        role: 'ExamController',    fullName: 'Demo Exam Controller' },
   { username: 'qec_demo',            email: 'qec@lms.com',            password: 'QEC@123',         role: 'QECCoordinator',    fullName: 'Demo Director QEC' },
   { username: 'provost_demo',        email: 'provost@lms.com',        password: 'Provost@123',     role: 'Provost',           fullName: 'Demo Provost' },
+  { username: 'finance_demo',        email: 'finance@lms.com',        password: process.env.LMS_DEMO_FINANCE_PASSWORD, role: 'Finance', fullName: 'Demo Finance Officer' },
 ];
 
 async function upsertDemoAccount(acc, client = prisma) {
@@ -151,10 +157,17 @@ async function upsertDemoAccount(acc, client = prisma) {
 // Accepts an optional Prisma client so callers can share a connection;
 // when omitted it uses this module's own client.
 async function seedDemoAccounts(client = prisma, { verbose = true } = {}) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to provision demo accounts with NODE_ENV=production');
+  }
   const log = verbose ? (...a) => console.log(...a) : () => {};
   log('Seeding LMS role-based demo accounts (idempotent)...');
   const results = [];
   for (const acc of DEMO_ACCOUNTS) {
+    if (!acc.password) {
+      log(`  skipped ${acc.username}: no password configured`);
+      continue;
+    }
     const user = await upsertDemoAccount(acc, client);
     results.push({ username: acc.username, email: acc.email, role: user.role, id: user.id });
   }

@@ -210,7 +210,10 @@ async function overrideFeeChallan(req, res) {
     const original = challan.status;
 
     const data = { status: newStatus };
-    if (newStatus === 'PAID' && !challan.paidAt) data.paidAt = new Date();
+    if (newStatus === 'PAID') {
+      data.paidAmount = challan.totalAmount + (challan.lateFee || 0);
+      if (!challan.paidAt) data.paidAt = new Date();
+    }
     const updated = await prisma.lmsFeeChallan.update({ where: { id }, data });
     await logOverride({
       req, targetModule: 'lms.feeChallan', targetId: id, action: 'override_fee_status',

@@ -1,7 +1,7 @@
 // ============================================================
 //  LMS ROLES (Section 4 / Section 7)
 //  ------------------------------------------------------------
-//  The LMS has exactly 7 roles. Because the SQLite connector does
+//  The LMS has 8 operational roles (plus SuperAdmin). Because the SQLite connector does
 //  not support native Prisma enums, the LmsUser.role column is a
 //  String validated against this canonical list in application code.
 //
@@ -24,6 +24,7 @@ const LMS_ROLES = [
   'ExamController',
   'QECCoordinator',
   'Provost',
+  'Finance',
   'SuperAdmin',
 ];
 
@@ -36,6 +37,7 @@ const ROLE_TO_FRONTEND = {
   ExamController: 'exam_coordinator',
   QECCoordinator: 'director_qec',
   Provost: 'provost',
+  Finance: 'finance',
   SuperAdmin: 'super_admin',
 };
 

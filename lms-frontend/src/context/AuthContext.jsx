@@ -19,6 +19,7 @@ export const BACKEND_ROLE_TO_FRONTEND = {
   ExamController: "exam_coordinator",
   QECCoordinator: "director_qec",
   Provost: "provost",
+  Finance: "finance",
 };
 export const FRONTEND_ROLE_TO_BACKEND = Object.fromEntries(
   Object.entries(BACKEND_ROLE_TO_FRONTEND).map(([k, v]) => [v, k])
@@ -92,9 +93,17 @@ const ROLE_PROFILES = {
     name: "Prof. Dr. Khalid Mehmood",
     email: "provost@aust.edu.pk",
     employeeId: "PRV-AUST-001",
-    designation: "Provost & Finance Coordinator — AUST",
+    designation: "Provost — AUST",
     department: "Office of the Provost",
     avatar: "https://ui-avatars.com/api/?name=Khalid+Mehmood&background=b45309&color=fff&bold=true&size=128",
+  },
+  finance: {
+    name: "Finance Office",
+    email: "finance@aust.edu.pk",
+    employeeId: "FIN-AUST-001",
+    designation: "Finance Officer — AUST",
+    department: "Finance Office",
+    avatar: "https://ui-avatars.com/api/?name=Finance&background=059669&color=fff&bold=true&size=128",
   },
 };
 
@@ -107,6 +116,7 @@ export const ROLE_META = {
   focal_person:         { label: "Focal Person",         color: "from-cyan-500 to-sky-600",      accent: "cyan"    },
   director_qec:         { label: "QEC Coordinator",      color: "from-purple-500 to-fuchsia-600",accent: "purple"  },
   provost:              { label: "Provost",              color: "from-amber-500 to-orange-600",  accent: "amber"   },
+  finance:              { label: "Finance",              color: "from-emerald-500 to-teal-600",  accent: "emerald" },
 };
 
 export const ALL_ROLES = Object.keys(ROLE_PROFILES);

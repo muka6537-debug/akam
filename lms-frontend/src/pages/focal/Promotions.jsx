@@ -47,8 +47,9 @@ const Promotions = () => {
     { key: "status", label: "Status", render: (v) => (
       <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${
         v === "Eligible" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : v === "Hold" ? "bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
                          : "bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
-      }`}>{v}</span>
+      }`} title={v === "Hold" ? "Unpaid fee dues — promotion on hold until cleared" : undefined}>{v}</span>
     )},
   ];
 
@@ -88,6 +89,7 @@ const Promotions = () => {
               <CheckCircle2 size={14} className="text-emerald-600" />
               Eligible students can be <b>promoted</b> to their next semester's scheme courses.
               Students <b>with failed subjects</b> get those courses tagged <b>RETAKE</b>.
+              Students with <b>unpaid fee dues</b> are on <b>Hold</b> until cleared.
             </p>
           </div>
 

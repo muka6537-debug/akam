@@ -29,6 +29,7 @@ const LMS_ROLES = {
   ExamController: 'Exam Controller',
   QECCoordinator: 'QEC Coordinator',
   Provost: 'Provost',
+  Finance: 'Finance',
   SuperAdmin: 'Super Admin',
 };
 

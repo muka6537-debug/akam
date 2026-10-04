@@ -1,10 +1,8 @@
 // ============================================================
-//  SUPER ADMIN — FEES & FINANCE GOVERNANCE  (Provost effect)
-//  ------------------------------------------------------------
-//  Announce a fee → creates a LmsFeeAnnouncement AND issues a
-//  challan into every matching student's account book (exactly
-//  like a Provost fee announcement). Review individual challans
-//  (approve / reject submitted payments).
+//  SUPER ADMIN — FEES & FINANCE GOVERNANCE
+//  Announce a fee (LmsFeeAnnouncement + a challan per matching
+//  student, exactly like a Provost announcement) and review
+//  challans: confirm a payment or waive a challan.
 // ============================================================
 import React, { useEffect, useState, useCallback } from 'react';
 import saApi from '../saApi';
@@ -19,9 +17,9 @@ const TABS = [
 ];
 
 const challanColor = (s) =>
-  s === 'PAID' || s === 'APPROVED' ? 'green'
-  : s === 'REJECTED' ? 'red'
-  : s === 'SUBMITTED' || s === 'UNDER_REVIEW' ? 'blue' : 'amber';
+  s === 'PAID' ? 'green'
+  : s === 'OVERDUE' ? 'red'
+  : s === 'PARTIAL' || s === 'WAIVED' ? 'blue' : 'amber';
 
 export const FeesFinance = () => {
   const [tab, setTab] = useState('challans');
@@ -29,7 +27,7 @@ export const FeesFinance = () => {
     <>
       <Breadcrumb items={[{ label: 'LMS Oversight' }, { label: 'Fees & Finance' }]} />
       <PageHeader title="Fees & Finance"
-        subtitle="Announce fees that bill students instantly, and review submitted challans — with full Provost authority." />
+        subtitle="Announce fees that bill students instantly, confirm payments or waive challans." />
       <div className="sa-tabs">
         {TABS.map((t) => (
           <button key={t.key} className={`sa-tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
@@ -70,7 +68,7 @@ const ChallansTab = () => {
     setBusy(true);
     try {
       await saApi.lmsReviewFee(reviewFor.id, { action, reason: reason || undefined });
-      toast.push(`Challan ${action === 'APPROVE' ? 'approved' : 'rejected'}`, 'success');
+      toast.push(`Challan ${action === 'approve' ? 'marked paid' : 'waived'}`, 'success');
       setReviewFor(null); setReason(''); load(page);
     } catch (e) { toast.push(e.response?.data?.error || 'Review failed', 'error'); }
     finally { setBusy(false); }
@@ -80,18 +78,21 @@ const ChallansTab = () => {
     { key: 'challanNo', header: 'Challan #', exportValue: (r) => r.challanNo },
     { key: 'title', header: 'Title', exportValue: (r) => r.title },
     { key: 'studentId', header: 'Student', render: (r) => r.student?.username || r.studentId, exportValue: (r) => r.student?.username || r.studentId },
-    { key: 'totalAmount', header: 'Amount', render: (r) => `Rs ${r.totalAmount?.toLocaleString?.() ?? r.totalAmount}`, exportValue: (r) => r.totalAmount },
+    { key: 'totalAmount', header: 'Net Due', render: (r) => `Rs ${(r.totalAmount + (r.lateFee || 0)).toLocaleString()}`, exportValue: (r) => r.totalAmount + (r.lateFee || 0) },
+    { key: 'paidAmount', header: 'Paid', render: (r) => `Rs ${(r.paidAmount || 0).toLocaleString()}`, exportValue: (r) => r.paidAmount || 0 },
     { key: 'status', header: 'Status', render: (r) => <Badge color={challanColor(r.status)}>{r.status}</Badge>, exportValue: (r) => r.status },
     { key: 'dueDate', header: 'Due', render: (r) => r.dueDate ? new Date(r.dueDate).toLocaleDateString() : '—', exportValue: (r) => r.dueDate },
     { key: '__a', header: '', render: (r) => (
-      <button className="sa-btn sa-btn-ghost sa-btn-sm" onClick={() => setReviewFor(r)}><i className="fas fa-gavel" /> Review</button>
+      ['UNPAID', 'PARTIAL', 'OVERDUE'].includes(r.status)
+        ? <button className="sa-btn sa-btn-ghost sa-btn-sm" onClick={() => setReviewFor(r)}><i className="fas fa-gavel" /> Review</button>
+        : null
     ), tdStyle: { textAlign: 'right' }, exportable: false },
   ];
 
   const filters = (
     <select className="sa-filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
       <option value="">All statuses</option>
-      {['UNPAID', 'SUBMITTED', 'UNDER_REVIEW', 'PAID', 'APPROVED', 'REJECTED'].map((s) => <option key={s} value={s}>{s}</option>)}
+      {['UNPAID', 'PARTIAL', 'OVERDUE', 'PAID', 'WAIVED'].map((s) => <option key={s} value={s}>{s}</option>)}
     </select>
   );
 
@@ -103,11 +104,11 @@ const ChallansTab = () => {
       {reviewFor && (
         <FormModal open title={`Review challan ${reviewFor.challanNo}`}
           subtitle={`${reviewFor.title} · Rs ${reviewFor.totalAmount}`}
-          submitLabel="Approve payment" loading={busy} onClose={() => { setReviewFor(null); setReason(''); }} onSubmit={() => review('APPROVE')}>
-          <div className="sa-field"><label>Decision note</label>
-            <textarea className="sa-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional remark (required when rejecting)…" /></div>
-          <button type="button" className="sa-btn sa-btn-danger" disabled={busy} onClick={() => { if (!reason.trim()) { toast.push('A reason is required to reject', 'error'); return; } review('REJECT'); }}>
-            <i className="fas fa-xmark" /> Reject payment
+          submitLabel="Confirm payment received" loading={busy} onClose={() => { setReviewFor(null); setReason(''); }} onSubmit={() => review('approve')}>
+          <div className="sa-field"><label>Note</label>
+            <textarea className="sa-textarea" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Required when waiving…" /></div>
+          <button type="button" className="sa-btn sa-btn-danger" disabled={busy} onClick={() => { if (!reason.trim()) { toast.push('A reason is required to waive', 'error'); return; } review('waive'); }}>
+            <i className="fas fa-hand-holding-dollar" /> Waive challan
           </button>
         </FormModal>
       )}

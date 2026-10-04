@@ -128,6 +128,8 @@ async function autoEnrollStudent(studentId) {
 
   const term = await prisma.academicTerm.findFirst({ where: { isCurrent: true, isActive: true } });
   if (!term) return { enrolled: 0, semesterNumber: null, skipped: 0, reason: 'no_current_term' };
+  // Unpaid fee dues block course registration (fee module hold).
+  if ((await require('./feeHolds').holdStatus(studentId)).onHold) return { enrolled: 0, semesterNumber: null, skipped: 0, reason: 'fee_hold' };
 
   const { number: semesterNumber, semesters } = await determineCurrentSemester(studentId, program.id);
   const semester = semesters.find((s) => s.number === semesterNumber);
